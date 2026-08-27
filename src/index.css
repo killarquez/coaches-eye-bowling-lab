@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-usbc-navy: #00205b;
+    --color-usbc-navy-dark: #071536;
+    --color-usbc-navy-light: #0d2e7a;
+    --color-usbc-red: #c8102e;
+    --color-usbc-red-dark: #a60d24;
+    --color-usbc-gold: #c39d5e;
+    --color-usbc-gold-dark: #b08b4b;
+    --color-usbc-gold-light: #d5b57a;
+    --color-bg-page: #f8fafc;
+
+    --color-text-main: #0f172a;
+    --color-text-muted: #475569;
+    --color-card-bg: #ffffff;
+    --color-border: #e2e8f0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  }
+
+  body {
+    background-color: #f8fafc;
+    color: #0f172a;
+    overflow-x: hidden;
+  }
+}
+
+/* Official Logo Display Fonts (Chakra Petch) */
+.font-display {
+  font-family: 'Chakra Petch', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
+}
+
+.font-logo {
+  font-family: 'Chakra Petch', system-ui, -apple-system, sans-serif !important;
+}
+
+.font-athletic-italic {
+  font-family: 'Chakra Petch', system-ui, -apple-system, sans-serif !important;
+  font-style: italic;
+  font-weight: 800;
+}
+
+
+/* Primary USBC Red Button */
+.btn-usbc-primary {
+  background-color: #c8102e !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border: 1px solid #a60d24 !important;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 14px 0 rgba(200, 16, 46, 0.35);
+  transition: all 0.2s ease-in-out;
+}
+.btn-usbc-primary:hover {
+  background-color: #a60d24 !important;
+  box-shadow: 0 6px 20px 0 rgba(200, 16, 46, 0.5);
+  transform: translateY(-1px);
+}
+
+/* USBC Navy Button */
+.btn-usbc-navy {
+  background-color: #00205b !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border: 1px solid #071536 !important;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 14px 0 rgba(0, 32, 91, 0.25);
+  transition: all 0.2s ease-in-out;
+}
+.btn-usbc-navy:hover {
+  background-color: #0b2e7a !important;
+  box-shadow: 0 6px 20px 0 rgba(0, 32, 91, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Crisp Official Cards */
+.card-usbc {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 32, 91, 0.05), 0 2px 4px -2px rgba(0, 32, 91, 0.05);
+  transition: all 0.25s ease-in-out;
+}
+
+.card-usbc:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 10px 25px -5px rgba(0, 32, 91, 0.1), 0 8px 10px -6px rgba(0, 32, 91, 0.05);
+}
+
+.usbc-navy-gradient {
+  background: linear-gradient(135deg, #001f54 0%, #0a2970 50%, #00173d 100%);
+}
+
+/* Pulsing Deal Badge Animation */
+@keyframes badge-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 14px 0 rgba(200, 16, 46, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px 4px rgba(200, 16, 46, 0.7);
+  }
+}
+
+.badge-deal-pulse {
+  animation: badge-pulse 2.2s infinite ease-in-out;
+  transform-origin: center;
+}
+
