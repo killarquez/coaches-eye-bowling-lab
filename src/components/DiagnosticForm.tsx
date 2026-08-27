@@ -249,10 +249,11 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
                     required
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="(626) 747-5701"
+                    placeholder="(909) 764-4824"
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none"
                   />
                 </div>
+
                 {errors.phone && <p className="text-xs text-red-600 mt-1 font-bold">{errors.phone}</p>}
               </div>
 

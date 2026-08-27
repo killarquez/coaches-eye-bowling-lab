@@ -5,8 +5,9 @@ export const COACH_INFO = {
   title: "USBC Level 1 Certified Coach & PBA Regional Competitor",
   locationName: "Bowlero West Covina",
   address: "675 S Glendora Ave, West Covina, CA 91790",
-  phone: "(626) 555-BOWL",
+  phone: "(909) 764-4824",
   email: "coaching@alfredobowling.com",
+
   instagram: "@alfredoquilarquez_bowling",
   calendlyUrl: "https://calendly.com", // standard embed or simulated direct calendar
   bio: `Great bowling is a precise science of repetition, physics, and biomechanics. As an active PBA member, USBC Level 1 Certified Coach (actively pursuing USBC Bronze), and competitive tournament bowler, I help athletes see what they cannot feel in their own physical game.
