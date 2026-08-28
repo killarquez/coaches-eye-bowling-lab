@@ -15,9 +15,10 @@ export const ProShopPartners: React.FC = () => {
       {/* Top Banner Hook */}
       <div className="bg-slate-50 border-2 border-blue-100 rounded-3xl p-8 sm:p-10 text-center max-w-4xl mx-auto shadow-xs">
         <p className="text-slate-800 text-base sm:text-lg leading-relaxed font-body font-semibold">
-          "Need ball drilling, surface adjustments, or layout optimization? We proudly collaborate with <strong className="text-[#00205b]">Pro Approach</strong> and <strong className="text-[#c8102e]">Axis Point Bowling</strong> in West Covina to match your physical game with the right arsenal."
+          "Need ball drilling, surface adjustments, or layout optimization? We are currently finalizing official partnership agreements with premier <strong className="text-[#00205b]">West Covina & San Gabriel Valley Pro Shops</strong> to match your physical game with the right arsenal."
         </p>
       </div>
+
 
       {/* 2 Pro Shop Partner Feature Cards with Exact Line Up & Equal Height */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">

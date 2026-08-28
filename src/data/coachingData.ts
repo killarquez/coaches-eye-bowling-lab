@@ -144,24 +144,24 @@ export const TESTIMONIALS: Testimonial[] = [
 
 export const PRO_SHOP_PARTNERS: ProShopPartner[] = [
   {
-    name: "Pro Approach Bowling Supply",
-    location: "West Covina, CA",
-    distance: "2.4 miles from Bowlero",
-    specialty: "Precision Digital Layouts, Surface Resurfacing & Arsenal Matching",
-    description: "Specializing in modern dual-angle and 2LS layout methods to complement Coach Alfredo's mechanical analysis. Their master IBPSIA drillers optimize thumb pitches and finger weight for maximum leverage.",
+    name: "Partner Pro Shop #1 (Pending Announcement)",
+    location: "West Covina / SGV Area",
+    distance: "Local Partner Network",
+    specialty: "Precision Digital Layouts, Surface Resurfacing & 2LS Drilling",
+    description: "Partnership agreements currently finalizing. We collaborate with master IBPSIA drillers to ensure dual-angle and 2LS layout methods complement Coach Alfredo's video biomechanics and PAP measurements.",
     services: ["Dual-Angle & 2LS Ball Drilling", "Digital Specto Axis Mapping", "Surface Grit & Polish Customization", "Custom Thumb & Finger Grip Molding"],
-    contact: "(626) 962-1144",
-    address: "West Covina Lanes Plaza, CA"
+    contact: "Announcing Soon",
+    address: "West Covina, CA"
   },
   {
-    name: "Axis Point Bowling Pro Shop",
-    location: "West Covina / SGV",
-    distance: "On-site / Partner Network",
+    name: "Partner Pro Shop #2 (Pending Announcement)",
+    location: "San Gabriel Valley, CA",
+    distance: "Local Partner Network",
     specialty: "High-Performance Ball Fitting, PAP Verification & Tournament Prep",
-    description: "Renowned for matching ball core dynamics (asymmetric vs symmetric) to your specific release specs (axis tilt, rotation, and ball speed). We work directly with Axis Point to test layouts on-lane.",
+    description: "Partnership agreements currently finalizing. Matching ball core dynamics (asymmetric vs symmetric) to your specific release specs (axis tilt, rotation, and ball speed) with direct on-lane spec sheets.",
     services: ["PAP (Positive Axis Point) Measurement", "Tournament Arsenal Blueprinting", "Weight Block & RG Optimization", "Interchangeable Thumb Insert Systems"],
-    contact: "(626) 859-9920",
-    address: "South Glendora Corridor, West Covina, CA"
+    contact: "Announcing Soon",
+    address: "West Covina Corridor, CA"
   }
 ];
 
@@ -209,6 +209,7 @@ export const FAQS = [
   },
   {
     q: "How do you coordinate with local Pro Shops?",
-    a: "If Coach Alfredo identifies that your ball layout or pitch angles are inhibiting clean release or leverage, we provide a written layout spec sheet directly to our trusted partners at Pro Approach and Axis Point Bowling."
+    a: "If Coach Alfredo identifies that your ball layout, thumb pitch, or span is inhibiting clean release or leverage, we provide a written layout spec sheet directly to your preferred driller or our trusted partner network."
   }
 ];
+
