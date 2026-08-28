@@ -37,10 +37,15 @@ export interface DiagnosticData {
   preferredDays: string[];
   emergencyContactName?: string;
   emergencyContactPhone?: string;
+  isMinor?: boolean;
+  parentGuardianName?: string;
   liabilityConsent: boolean;
   videoConsent: boolean;
+  marketingMediaConsent: 'granted' | 'private_only';
+  cancellationPolicyConsent: boolean;
   signedTimestamp?: string;
 }
+
 
 
 export interface ProShopPartner {

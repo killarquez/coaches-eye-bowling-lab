@@ -45,8 +45,12 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
     preferredDays: ['Weekday Evenings', 'Weekend Mornings'],
     emergencyContactName: '',
     emergencyContactPhone: '',
+    isMinor: false,
+    parentGuardianName: '',
     liabilityConsent: false,
     videoConsent: true,
+    marketingMediaConsent: 'granted',
+    cancellationPolicyConsent: false,
     signedTimestamp: ''
   });
 
@@ -104,11 +108,19 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
     e.preventDefault();
     if (step === 1 && !validateStep1()) return;
 
+    const validationErrors: Record<string, string> = {};
     if (!formData.liabilityConsent) {
-      setErrors((prev) => ({
-        ...prev,
-        liability: 'You must read and accept the Athletic Liability Waiver to complete registration.'
-      }));
+      validationErrors.liability = 'You must accept the Assumption of Risk & Liability Release.';
+    }
+    if (!formData.cancellationPolicyConsent) {
+      validationErrors.cancellation = 'You must agree to the 24-Hour Rescheduling/Cancellation Policy.';
+    }
+    if (formData.isMinor && !formData.parentGuardianName?.trim()) {
+      validationErrors.minor = 'Parent / Guardian Legal Name is required for youth bowlers under 18.';
+    }
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
       return;
     }
 
@@ -133,6 +145,7 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
       // fallback
     }
   };
+
 
 
   return (
@@ -471,33 +484,36 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
                 </select>
               </div>
 
-              {/* ATHLETE LIABILITY WAIVER & VIDEO CONSENT AGREEMENT CARD */}
-              <div className="bg-slate-50 border-2 border-slate-300 rounded-2xl p-5 sm:p-6 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              {/* COACH'S EYE BOWLING LAB 4-PART AGREEMENTS & CONSENT SUITE */}
+              <div className="bg-slate-50 border-2 border-slate-300 rounded-2xl p-5 sm:p-7 space-y-6">
+                <div className="flex flex-wrap items-center justify-between border-b border-slate-200 pb-3.5 gap-2">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="w-5 h-5 text-[#c8102e]" />
-                    <span className="text-xs sm:text-sm font-bold text-[#00205b] uppercase font-display">
-                      Athlete Safety & Liability Agreement
-                    </span>
+                    <div>
+                      <span className="text-xs sm:text-sm font-bold text-[#00205b] uppercase font-display block">
+                        Coach's Eye Bowling Lab Agreements & Consent
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-body">Bowlero West Covina • Alfredo Quilarquez</span>
+                    </div>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => setShowWaiverModal(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#c8102e] hover:underline cursor-pointer"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#c8102e] hover:underline cursor-pointer bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg shadow-2xs"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    <span>View Full Waiver Document</span>
+                    <span>View All 4 Documents & Policies</span>
                   </button>
                 </div>
 
-                <p className="text-xs text-slate-600 leading-relaxed font-body">
-                  Participation in athletic bowling instruction at Bowlero West Covina involves physical exertion, slide footwork, and heavy ball acceleration. Please review and accept the terms below:
-                </p>
-
-                {/* Consent Checkboxes */}
-                <div className="space-y-3 pt-1">
-                  <label className="flex items-start gap-3 cursor-pointer group">
+                {/* 1. Assumption of Risk & Liability Release */}
+                <div className="space-y-2 text-xs">
+                  <div className="font-bold text-[#00205b] uppercase flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-[#00205b] text-white flex items-center justify-center text-[10px]">1</span>
+                    <span>Assumption of Risk & Liability Release (Required)</span>
+                  </div>
+                  <label className="flex items-start gap-3 cursor-pointer bg-white p-3.5 rounded-xl border border-slate-200 hover:border-slate-300">
                     <input
                       type="checkbox"
                       checked={formData.liabilityConsent}
@@ -513,39 +529,131 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
                       }}
                       className="w-4 h-4 mt-0.5 rounded border-slate-300 text-[#00205b] focus:ring-[#00205b] cursor-pointer shrink-0"
                     />
-                    <span className="text-xs text-slate-800 leading-snug font-medium">
-                      <strong className="text-[#00205b]">Required:</strong> I have read, understand, and agree to the{' '}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowWaiverModal(true);
-                        }}
-                        className="text-[#c8102e] font-bold underline hover:text-[#a60d24]"
-                      >
-                        Athletic Liability Waiver, Inherent Risk Assumption, and Release of Claims
-                      </button>{' '}
-                      for Coach Alfredo Quilarquez & Bowlero West Covina.
-                    </span>
-                  </label>
-
-                  <label className="flex items-start gap-3 cursor-pointer group">
-                    <input
-                      type="checkbox"
-                      checked={formData.videoConsent}
-                      onChange={(e) => setFormData({ ...formData, videoConsent: e.target.checked })}
-                      className="w-4 h-4 mt-0.5 rounded border-slate-300 text-[#00205b] focus:ring-[#00205b] cursor-pointer shrink-0"
-                    />
-                    <span className="text-xs text-slate-800 leading-snug font-medium">
-                      <strong className="text-[#00205b]">Required:</strong> I consent to 240fps slow-motion multi-angle video recording strictly for biomechanical diagnosis and technique review.
+                    <span className="text-slate-800 leading-snug font-medium">
+                      I acknowledge inherent physical risks (approach slip/trip hazards, repetitive motion, dropped equipment) and explicitly release Alfredo Quilarquez and Coach's Eye Bowling Lab from legal liability. I certify my medical fitness for on-lane drills and coaching.
                     </span>
                   </label>
                 </div>
 
-                {errors.liability && (
-                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-600 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>{errors.liability}</span>
+                {/* 2. Minor Bowler & SafeSport Acknowledgment */}
+                <div className="space-y-2 text-xs">
+                  <div className="font-bold text-[#00205b] uppercase flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-[#00205b] text-white flex items-center justify-center text-[10px]">2</span>
+                    <span>Youth Bowler & SafeSport Verification</span>
+                  </div>
+                  
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-semibold mb-2">
+                    <input
+                      type="checkbox"
+                      checked={formData.isMinor || false}
+                      onChange={(e) => setFormData({ ...formData, isMinor: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-300 text-[#00205b] focus:ring-[#00205b] cursor-pointer"
+                    />
+                    <span>Is the participating bowler under 18 years of age?</span>
+                  </label>
+
+                  {formData.isMinor && (
+                    <div className="bg-emerald-50/70 border border-emerald-200 p-4 rounded-xl space-y-3 animate-in fade-in">
+                      <div className="text-emerald-950 font-semibold text-[11px] leading-relaxed">
+                        Coach Alfredo Quilarquez is USBC SafeSport and Registered Volunteer Program (RVP) cleared. All youth sessions adhere strictly to open-observation protocols.
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-800 uppercase text-[11px] mb-1">
+                          Parent / Legal Guardian Full Name *
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.parentGuardianName || ''}
+                          onChange={(e) => setFormData({ ...formData, parentGuardianName: e.target.value })}
+                          placeholder="Parent / Guardian Legal Name"
+                          className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:border-[#00205b] focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Biomechanics & Video Media Release */}
+                <div className="space-y-2 text-xs">
+                  <div className="font-bold text-[#00205b] uppercase flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-[#00205b] text-white flex items-center justify-center text-[10px]">3</span>
+                    <span>Biomechanics & Video Media Release</span>
+                  </div>
+
+                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2.5">
+                    <div className="text-slate-600 leading-snug">
+                      I consent to 240fps slow-motion video analysis for technique improvement. Please select your social media & promotional preference:
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <label className={`p-2.5 rounded-lg border text-xs font-semibold flex items-start gap-2 cursor-pointer transition-all ${
+                        formData.marketingMediaConsent === 'granted'
+                          ? 'bg-blue-50 border-[#00205b] text-[#00205b]'
+                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="marketingMedia"
+                          checked={formData.marketingMediaConsent === 'granted'}
+                          onChange={() => setFormData({ ...formData, marketingMediaConsent: 'granted' })}
+                          className="mt-0.5 text-[#00205b] focus:ring-[#00205b]"
+                        />
+                        <span><strong>Grant Permission:</strong> May use anonymized/credited video clips on website or social media.</span>
+                      </label>
+
+                      <label className={`p-2.5 rounded-lg border text-xs font-semibold flex items-start gap-2 cursor-pointer transition-all ${
+                        formData.marketingMediaConsent === 'private_only'
+                          ? 'bg-blue-50 border-[#00205b] text-[#00205b]'
+                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="marketingMedia"
+                          checked={formData.marketingMediaConsent === 'private_only'}
+                          onChange={() => setFormData({ ...formData, marketingMediaConsent: 'private_only' })}
+                          className="mt-0.5 text-[#00205b] focus:ring-[#00205b]"
+                        />
+                        <span><strong>Private Only:</strong> Do NOT use footage outside of my private instructional review.</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Package Terms & Cancellation Policy */}
+                <div className="space-y-2 text-xs">
+                  <div className="font-bold text-[#00205b] uppercase flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-[#00205b] text-white flex items-center justify-center text-[10px]">4</span>
+                    <span>Package Terms & 24-Hour Cancellation Policy (Required)</span>
+                  </div>
+
+                  <label className="flex items-start gap-3 cursor-pointer bg-white p-3.5 rounded-xl border border-slate-200 hover:border-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={formData.cancellationPolicyConsent}
+                      onChange={(e) => {
+                        setFormData({ ...formData, cancellationPolicyConsent: e.target.checked });
+                        if (e.target.checked && errors.cancellation) {
+                          setErrors((prev) => {
+                            const copy = { ...prev };
+                            delete copy.cancellation;
+                            return copy;
+                          });
+                        }
+                      }}
+                      className="w-4 h-4 mt-0.5 rounded border-slate-300 text-[#00205b] focus:ring-[#00205b] cursor-pointer shrink-0"
+                    />
+                    <span className="text-slate-800 leading-snug font-medium">
+                      I agree to provide at least <strong>24 hours' notice</strong> for rescheduling or cancellations. I understand prepaid multi-session packages/clinics remain valid for <strong>6 months</strong> and fees are non-refundable once sessions begin.
+                    </span>
+                  </label>
+                </div>
+
+                {/* Validation Errors Alert */}
+                {(errors.liability || errors.cancellation || errors.minor) && (
+                  <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-600 space-y-1">
+                    {errors.liability && <div className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /><span>{errors.liability}</span></div>}
+                    {errors.cancellation && <div className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /><span>{errors.cancellation}</span></div>}
+                    {errors.minor && <div className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /><span>{errors.minor}</span></div>}
                   </div>
                 )}
 
@@ -603,6 +711,7 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
           )}
         </form>
       </div>
+
 
 
             {/* Right 4 cols: Side Info Panel with Pro Shop / Facility / Calibration Specs */}
@@ -676,16 +785,26 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
               </div>
             </div>
 
-            {/* Signed Waiver & Safety Badge */}
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-900">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="font-bold">Athletic Liability Waiver & Video Consent: Signed</span>
+            {/* Signed Agreements Status Box */}
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-xs text-emerald-950">
+              <div className="flex flex-wrap items-center justify-between font-bold border-b border-emerald-200 pb-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Coach's Eye Agreements On File</span>
+                </div>
+                <span className="text-emerald-700 text-[11px] font-mono font-medium">
+                  Signed: {formData.signedTimestamp || 'Active'}
+                </span>
               </div>
-              <span className="text-emerald-700 text-[11px] font-mono font-medium">
-                {formData.signedTimestamp || 'Active'}
-              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-medium pt-1 text-emerald-900">
+                <div>✓ 1. Assumption of Risk & Liability Release: <span className="font-bold">Signed</span></div>
+                <div>✓ 2. Package Terms & 24h Cancellation: <span className="font-bold">Agreed</span></div>
+                <div>✓ 3. Video Media Preference: <span className="font-bold">{formData.marketingMediaConsent === 'granted' ? 'Promotional & Web' : 'Private Analysis Only'}</span></div>
+                <div>✓ 4. SafeSport / Minor Status: <span className="font-bold">{formData.isMinor ? `Youth (Guardian: ${formData.parentGuardianName || 'Authorized'})` : 'Adult Athlete (18+)'}</span></div>
+              </div>
             </div>
+
 
             {/* Coach's Automated Pre-Session Strategy Insight */}
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-xs">
