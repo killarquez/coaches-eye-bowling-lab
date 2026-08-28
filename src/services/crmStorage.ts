@@ -6,6 +6,33 @@ const BOOKINGS_STORAGE_KEY = 'ceb_crm_bookings_v2';
 const FINANCIALS_STORAGE_KEY = 'ceb_crm_financials_v2';
 const OTP_STORE_KEY = 'ceb_otp_store_v2';
 
+export const GOOGLE_APPS_SCRIPT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbyvR2Yx8qYbjI660F40eWBut73vTXQEdNpCoJ71dsvAsdWNMoO_BGabxVc0QFTUbHlv/exec';
+
+export const triggerDriveWebhook = async (payload: {
+  fullName: string;
+  studentId: string;
+  email: string;
+  style?: string;
+  bookAverage?: string | number;
+  goals?: string;
+}): Promise<boolean> => {
+  try {
+    await fetch(GOOGLE_APPS_SCRIPT_WEBHOOK_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (err) {
+    console.error('Google Apps Script Webhook Error:', err);
+    return false;
+  }
+};
+
+
 export const INITIAL_ATHLETES: AthleteProfile[] = [
   {
     id: 'CEB-101',
@@ -322,8 +349,20 @@ export const syncDiagnosticToCrm = (data: DiagnosticData): AthleteProfile => {
   }
 
   saveAthletes(athletes);
+
+  // Trigger Google Drive Webhook to automatically create student folder
+  triggerDriveWebhook({
+    fullName: updatedProfile.fullName,
+    studentId: updatedProfile.id,
+    email: updatedProfile.email,
+    style: updatedProfile.style,
+    bookAverage: updatedProfile.bookAverage,
+    goals: updatedProfile.primaryGoal
+  });
+
   return updatedProfile;
 };
+
 
 export const syncBookingToCrm = (bookingInfo: {
   athleteName: string;

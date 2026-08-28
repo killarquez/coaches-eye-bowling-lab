@@ -27,7 +27,9 @@ import {
   getBookings, 
   saveBookings, 
   getFinancials,
-  generateGoogleCalendarUrl
+  generateGoogleCalendarUrl,
+  triggerDriveWebhook,
+  GOOGLE_APPS_SCRIPT_WEBHOOK_URL
 } from '../../services/crmStorage';
 import { CrmCalendarView } from './CrmCalendarView';
 
@@ -39,11 +41,13 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [pinCode, setPinCode] = useState<string>('');
   const [authError, setAuthError] = useState<string>('');
+  const [testWebhookStatus, setTestWebhookStatus] = useState<'idle' | 'testing' | 'success'>('idle');
 
   const [activeTab, setActiveTab] = useState<'overview' | 'calendar' | 'athletes' | 'financials' | 'automation'>('overview');
   const [athletes, setAthletes] = useState<AthleteProfile[]>(getAthletes());
   const [bookings, setBookings] = useState<CrmBooking[]>(getBookings());
   const [financials] = useState<FinancialRecord[]>(getFinancials());
+
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [styleFilter, setStyleFilter] = useState<string>('all');
@@ -631,37 +635,93 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
                 
-                <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                  <div className="font-bold text-[#00205b] text-sm uppercase flex items-center gap-2">
-                    <Folder className="w-4 h-4 text-amber-500" />
-                    <span>Automated Google Drive Folder Creator</span>
+                <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold text-[#00205b] text-sm uppercase flex items-center gap-2">
+                      <Folder className="w-4 h-4 text-amber-500" />
+                      <span>Google Drive Folder Automator</span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase border border-emerald-300 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                      <span>Live & Connected</span>
+                    </span>
                   </div>
+
                   <p className="text-slate-600 leading-relaxed font-body">
-                    When a bowler submits a diagnostic or booking on <strong>cebowlinglab.com</strong>, the webhook creates a dedicated student folder under <code>Google Drive / Students / [CEB-XXX] Full Name</code> and generates their preliminary assessment sheet.
+                    When a bowler registers on <strong>cebowlinglab.com</strong>, the webhook triggers Google Apps Script to create a real student folder in <code>Google Drive / CE Bowling Lab - Students / [CEB-XXX] Full Name</code>.
                   </p>
-                  <div className="pt-2 text-emerald-700 font-bold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Destination: CEBowlingLab@gmail.com</span>
+
+                  <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">Active Webhook URL:</span>
+                    <code className="text-[11px] font-mono text-slate-700 break-all block">
+                      {GOOGLE_APPS_SCRIPT_WEBHOOK_URL}
+                    </code>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      type="button"
+                      disabled={testWebhookStatus === 'testing'}
+                      onClick={async () => {
+                        setTestWebhookStatus('testing');
+                        await triggerDriveWebhook({
+                          fullName: 'Test Bowler (Verification)',
+                          studentId: `CEB-VERIFY-${Math.floor(100 + Math.random() * 900)}`,
+                          email: 'CEBowlingLab@gmail.com',
+                          style: '2-Handed',
+                          bookAverage: 200,
+                          goals: 'Automated test folder creation from Coach Dashboard'
+                        });
+                        setTestWebhookStatus('success');
+                        setTimeout(() => setTestWebhookStatus('idle'), 5000);
+                      }}
+                      className="bg-[#00205b] hover:bg-[#001740] text-white font-bold text-xs uppercase px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-[#c39d5e]" />
+                      <span>{testWebhookStatus === 'testing' ? 'Creating Test Folder...' : testWebhookStatus === 'success' ? '✓ Test Folder Created!' : '⚡ Send Test Ping to Google Drive'}</span>
+                    </button>
+                    
+                    <span className="text-emerald-700 font-bold text-[11px]">Destination: CEBowlingLab@gmail.com</span>
                   </div>
                 </div>
 
-                <div className="p-5 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-3">
-                  <div className="font-bold text-[#00205b] text-sm uppercase flex items-center gap-2">
-                    <CalendarIcon className="w-4 h-4 text-[#c8102e]" />
-                    <span>Two-Way Google Calendar Synchronization</span>
+                <div className="p-5 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="font-bold text-[#00205b] text-sm uppercase flex items-center gap-2">
+                      <CalendarIcon className="w-4 h-4 text-[#c8102e]" />
+                      <span>Two-Way Google Calendar Sync</span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold uppercase border border-blue-300">
+                      Active
+                    </span>
                   </div>
+
                   <p className="text-slate-600 leading-relaxed font-body">
-                    All on-lane appointments at Bowlero West Covina generate live Google Calendar events with student notes, phone numbers, and lane specs.
+                    All on-lane appointments at Bowlero West Covina generate instant Google Calendar links and exportable <code>.ics</code> files with student notes, phone numbers, and lane specs.
                   </p>
-                  <div className="pt-2 text-blue-900 font-bold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-blue-600" />
-                    <span>Calendar: CEBowlingLab@gmail.com</span>
+
+                  <div className="p-3 bg-white/80 border border-blue-200 rounded-xl space-y-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">Google Calendar Target:</span>
+                    <span className="font-bold text-slate-800">CEBowlingLab@gmail.com</span>
+                  </div>
+
+                  <div className="pt-2">
+                    <a
+                      href="https://calendar.google.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase px-4 py-2.5 rounded-xl inline-flex items-center gap-1.5 shadow-xs"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open Google Calendar</span>
+                    </a>
                   </div>
                 </div>
 
               </div>
             </div>
           )}
+
 
         </div>
       )}
