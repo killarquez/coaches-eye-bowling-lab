@@ -10,10 +10,12 @@ export const COACH_INFO = {
   departmentEmails: {
     bookings: "bookings@cebowlinglab.com",
     coaching: "coaching@cebowlinglab.com",
+    payments: "payments@cebowlinglab.com",
     outreach: "outreach@cebowlinglab.com",
     info: "info@cebowlinglab.com",
     alfredo: "alfredo@cebowlinglab.com"
   },
+
 
 
 

@@ -11,9 +11,11 @@
 - **Department Emails**:
   - Bookings & Scheduling: `bookings@cebowlinglab.com`
   - Athlete Diagnostics & Evaluations: `coaching@cebowlinglab.com`
+  - Invoicing & Payments: `payments@cebowlinglab.com`
   - Marketing, Camps & Partnerships: `outreach@cebowlinglab.com`
   - General Inquiries: `info@cebowlinglab.com`
   - Direct Coach Inquiries: `alfredo@cebowlinglab.com`
+
 
 ## Coaching Specializations
 
