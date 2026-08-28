@@ -8,9 +8,15 @@
 - **Location**: Bowlero West Covina, 675 S Glendora Ave, West Covina, CA 91790 (San Gabriel Valley / Los Angeles / Southern California).
 - **Official Website**: https://cebowlinglab.com
 - **Direct Phone**: (909) 766-2710
-- **Official Email**: coach@cebowlinglab.com
+- **Department Emails**:
+  - Bookings & Scheduling: `bookings@cebowlinglab.com`
+  - Athlete Diagnostics & Evaluations: `coaching@cebowlinglab.com`
+  - Marketing, Camps & Partnerships: `outreach@cebowlinglab.com`
+  - General Inquiries: `info@cebowlinglab.com`
+  - Direct Coach Inquiries: `alfredo@cebowlinglab.com`
 
 ## Coaching Specializations
+
 
 
 
