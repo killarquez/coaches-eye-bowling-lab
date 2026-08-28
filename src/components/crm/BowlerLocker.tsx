@@ -18,14 +18,17 @@ import {
   Disc,
   Play
 } from 'lucide-react';
-import type { AthleteProfile } from '../../types/crm';
+import type { AthleteProfile, CrmBooking } from '../../types/crm';
+
 import { 
   getAthletes, 
   getBookings, 
   generateLockerOtp, 
   verifyLockerOtp,
   generateGoogleCalendarUrl,
-  downloadIcsFile
+  downloadIcsFile,
+  fetchCloudAthletes,
+  fetchCloudBookings
 } from '../../services/crmStorage';
 
 interface BowlerLockerProps {
@@ -44,8 +47,13 @@ export const BowlerLocker: React.FC<BowlerLockerProps> = ({
   const [error, setError] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'video' | 'drills' | 'arsenal' | 'schedule'>('video');
 
-  const athletes = getAthletes();
-  const bookings = getBookings();
+  const [athletes, setAthletes] = useState<AthleteProfile[]>(getAthletes());
+  const [bookings, setBookings] = useState<CrmBooking[]>(getBookings());
+
+  React.useEffect(() => {
+    fetchCloudAthletes().then((data) => { if (data && data.length > 0) setAthletes(data); });
+    fetchCloudBookings().then((data) => { if (data && data.length > 0) setBookings(data); });
+  }, []);
 
   const handleRequestOtp = (e: React.FormEvent) => {
     e.preventDefault();

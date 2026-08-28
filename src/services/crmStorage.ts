@@ -1,5 +1,6 @@
 import type { AthleteProfile, CrmBooking, FinancialRecord } from '../types/crm';
 import type { DiagnosticData } from '../types';
+import { supabase } from './supabaseClient';
 
 const ATHLETES_STORAGE_KEY = 'ceb_crm_athletes_v2';
 const BOOKINGS_STORAGE_KEY = 'ceb_crm_bookings_v2';
@@ -7,7 +8,6 @@ const FINANCIALS_STORAGE_KEY = 'ceb_crm_financials_v2';
 const OTP_STORE_KEY = 'ceb_otp_store_v2';
 
 export const GOOGLE_APPS_SCRIPT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwYIq4gHYy0noasu_dGNtSxMS72y2xfJv87eunOiqUjLFnxYFzTHgOYf662-fuFFJF_/exec';
-
 
 export const triggerDriveWebhook = async (payload: {
   fullName: string;
@@ -33,7 +33,6 @@ export const triggerDriveWebhook = async (payload: {
   }
 };
 
-
 export const INITIAL_ATHLETES: AthleteProfile[] = [
   {
     id: 'CEB-101',
@@ -58,7 +57,7 @@ export const INITIAL_ATHLETES: AthleteProfile[] = [
     nextSessionDate: '2026-09-02',
     nextSessionTime: '6:00 PM - 7:00 PM',
     clinicCohort: 'Tuesday Advanced Cohort',
-    googleDriveFolderUrl: 'https://drive.google.com/drive/folders/demo-ceb-101-marcus-turner',
+    googleDriveFolderUrl: 'https://drive.google.com/drive/folders/19G4eW24NYDv4VXaEKbtbs-9MuerV1HJQ',
     arsenal: [
       { name: 'Storm Phaze II (Solid)', coverstock: 'Solid Reactive', weight: '15 lbs', layout: '45 x 4.5 x 30', notes: 'Benchmark oil ball' },
       { name: 'Roto Grip Hustle USA (Hybrid)', coverstock: 'Hybrid Reactive', weight: '15 lbs', layout: '50 x 5 x 35', notes: 'Transition ball' },
@@ -67,130 +66,82 @@ export const INITIAL_ATHLETES: AthleteProfile[] = [
     videos: [
       {
         id: 'VID-001',
-        title: 'Session 2: Pushaway Hinge & Slide Knee Flexion (240fps)',
+        title: 'Session 1: High-Speed Foul Line Release',
         url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        date: '2026-08-20',
+        date: '2026-08-14',
         fps: 240,
-        coachingNotes: 'Great improvement on keeping shoulders perpendicular to target line. Reduced slide bounce by dropping spine angle 4 degrees at the line.',
-        keyCheckpoints: [
-          'Pushaway initiated on step 2 smoothly',
-          'Elbow inside the ball through apex',
-          'Foul line slide knee bent at 42 degrees'
-        ]
+        coachingNotes: 'Pushaway timing is late by 0.5 steps causing upper body tilt on step 4. Leverage restored on 1-step drill.',
+        keyCheckpoints: ['Shoulder parallel to target line', 'Knee flexion angle at 45 degrees', 'Release inside of the ball']
+      },
+      {
+        id: 'VID-002',
+        title: 'Session 2: Axis Rotation Adjustment on Fresh Oil',
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        date: '2026-08-21',
+        fps: 240,
+        coachingNotes: 'Transitioned from 65 degree axis rotation to 45 degree forward roll for flat oil pattern control.',
+        keyCheckpoints: ['Index finger spread pressure', 'Follow through towards target board 15']
       }
     ],
     drills: [
-      {
-        id: 'DRL-001',
-        title: '1-Step Foul Line Leverage Pause Drill',
-        category: 'Release & Leverage',
-        instructions: 'Start on slide foot at foul line, swing ball with loose gravity, release with flat flat-spot window and hold balance for 3 full seconds.',
-        targetReps: '15 shots per practice session',
-        completed: true
-      },
-      {
-        id: 'DRL-002',
-        title: '3-6-9 Pin 10 Straight Line Footwork',
-        category: '3-6-9 Spares',
-        instructions: 'Shift stance 9 boards left, target 3rd arrow straight, zero wrist rotation with plastic spare ball.',
-        targetReps: '10 consecutive clean spares',
-        completed: false
-      }
+      { id: 'DRL-1', title: '1-Step Foul Line Pause Drill', category: 'Footwork & Balance', instructions: 'Set up at foul line with slide foot, swing back and freeze at finish for 3 seconds.', targetReps: '15 shots', completed: true },
+      { id: 'DRL-2', title: 'Yo-Yo Release Finger Snap', category: 'Release & Leverage', instructions: 'Feel the ball roll off the palm without squeezing the thumb.', targetReps: '20 shots', completed: false },
+      { id: 'DRL-3', title: '3-6-9 Single Pin Spare Targeting', category: '3-6-9 Spares', instructions: 'Move 3 boards right for 10-pin; 3 boards left for 7-pin using plastic spare ball.', targetReps: '10 spares', completed: true }
     ],
-    signedWaiverTimestamp: 'Aug 14, 2026, 4:15 PM',
+    signedWaiverTimestamp: 'Aug 12, 2026 4:15 PM',
     marketingConsent: 'granted',
     isMinor: false,
-    emergencyContactName: 'Sarah Turner (Spouse)',
-    emergencyContactPhone: '(909) 555-0193',
-    createdAt: '2026-08-14',
-    lastCoachedAt: '2026-08-20'
+    createdAt: '2026-08-12',
+    lastCoachedAt: '2026-08-21'
   },
   {
     id: 'CEB-102',
     fullName: 'Elena Rodriguez',
     email: 'elena.rodriguez@example.com',
-    phone: '(626) 555-7841',
+    phone: '(909) 555-0481',
     style: '1-Handed',
     dominantHand: 'Right',
-    bookAverage: 172,
-    careerHighSeries: 622,
-    careerHighGame: 254,
-    primaryGoal: 'Timing, Leverage & Foul Line Balance',
+    bookAverage: 168,
+    careerHighSeries: 589,
+    careerHighGame: 234,
+    primaryGoal: 'Spare System Reliability & Arm Swing Timing',
     physicalLimitations: 'None',
-    papCoordinates: '4 1/8" over by 3/8" up',
-    axisTiltDeg: 11,
+    papCoordinates: '5" over by 1/4" up',
+    axisTiltDeg: 18,
     axisRotationDeg: 45,
     averageSpeedMph: 14.5,
-    estimatedRevRateRpm: 290,
+    estimatedRevRateRpm: 280,
     packageTier: '4-Week Group Cohort Clinic',
     sessionsTotal: 4,
     sessionsCompleted: 1,
     nextSessionDate: '2026-09-03',
     nextSessionTime: '7:00 PM - 8:30 PM',
-    clinicCohort: 'Thursday Mechanics Clinic (Bowlero West Covina)',
-    googleDriveFolderUrl: 'https://drive.google.com/drive/folders/demo-ceb-102-elena-rodriguez',
+    clinicCohort: 'Thursday Adult Clinic',
+    googleDriveFolderUrl: 'https://drive.google.com/drive/folders/19G4eW24NYDv4VXaEKbtbs-9MuerV1HJQ',
     arsenal: [
-      { name: 'Motiv Venom Shock (Solid)', coverstock: 'Solid Reactive', weight: '14 lbs', layout: '60 x 4 x 40', notes: 'Control benchmark' },
-      { name: 'Columbia 300 White Dot', coverstock: 'Plastic Spare', weight: '14 lbs', layout: 'Standard', notes: 'Spares' }
+      { name: 'Brunswick Rhino (Pearl)', coverstock: 'Pearl Reactive', weight: '14 lbs', layout: '55 x 4 x 35', notes: 'House shot benchmark' },
+      { name: 'Columbia 300 White Dot', coverstock: 'Plastic Spare', weight: '14 lbs', layout: 'Standard', notes: 'Corner spares' }
     ],
     videos: [
       {
-        id: 'VID-002',
-        title: 'Session 1: Swing Plane Alignment & Shoulder Drop (240fps)',
+        id: 'VID-003',
+        title: 'Session 1: Backswing Alignment & Crossover Step',
         url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        date: '2026-08-22',
+        date: '2026-08-21',
         fps: 240,
-        coachingNotes: 'Aligned footwork drift to left by 3 boards to create direct swing channel. Shoulder drop minimized.',
-        keyCheckpoints: [
-          'Cross-over step 2 alignment',
-          'Free pendular backswing (no muscling)',
-          'Soft thumb exit with clean flat-spot roll'
-        ]
+        coachingNotes: 'Step 2 crossover step cleared the right hip, allowing a pure vertical pendulum swing.',
+        keyCheckpoints: ['Step 2 crossover directly in front of left foot', 'Loose elbow in downswing']
       }
     ],
     drills: [
-      {
-        id: 'DRL-003',
-        title: 'No-Step Release Drill into Towel/Pillow',
-        category: 'Release & Leverage',
-        instructions: 'Practice soft thumb release with fingers rolling over 12-to-6 axis without muscling.',
-        targetReps: '20 reps before league night',
-        completed: true
-      }
+      { id: 'DRL-4', title: 'Tape Line Footwork Walk-Through', category: 'Footwork & Balance', instructions: 'Walk 5 steps along foul line center board without drifting right.', targetReps: '10 walk-throughs', completed: true },
+      { id: 'DRL-5', title: 'Cross-Lane 10-Pin Spare Routine', category: '3-6-9 Spares', instructions: 'Stand on board 35, target board 20 at arrows with plastic ball flat wrist.', targetReps: '15 shots', completed: false }
     ],
-    signedWaiverTimestamp: 'Aug 21, 2026, 11:30 AM',
+    signedWaiverTimestamp: 'Aug 18, 2026 6:30 PM',
     marketingConsent: 'granted',
     isMinor: false,
-    createdAt: '2026-08-21',
-    lastCoachedAt: '2026-08-22'
-  },
-  {
-    id: 'CEB-103',
-    fullName: 'Jordan Kim',
-    email: 'jordan.kim@example.com',
-    phone: '(909) 555-9012',
-    style: '2-Handed',
-    dominantHand: 'Right',
-    bookAverage: 188,
-    careerHighSeries: 665,
-    careerHighGame: 268,
-    primaryGoal: '3-6-9 Single-Pin Spare Conversion',
-    physicalLimitations: 'None',
-    packageTier: '60-Minute Mechanical Tune-Up',
-    sessionsTotal: 1,
-    sessionsCompleted: 1,
-    googleDriveFolderUrl: 'https://drive.google.com/drive/folders/demo-ceb-103-jordan-kim',
-    arsenal: [
-      { name: 'Hammer Black Widow 2.0 (Solid)', coverstock: 'Solid Reactive', weight: '15 lbs' },
-      { name: 'Hammer Purple Pearl Urethane', coverstock: 'Urethane', weight: '15 lbs' }
-    ],
-    videos: [],
-    drills: [],
-    signedWaiverTimestamp: 'Aug 25, 2026, 7:10 PM',
-    marketingConsent: 'private_only',
-    isMinor: false,
-    createdAt: '2026-08-25',
-    lastCoachedAt: '2026-08-25'
+    createdAt: '2026-08-18',
+    lastCoachedAt: '2026-08-21'
   }
 ];
 
@@ -201,8 +152,8 @@ export const INITIAL_BOOKINGS: CrmBooking[] = [
     athleteName: 'Marcus Turner',
     athleteEmail: 'marcus.turner@example.com',
     athletePhone: '(909) 555-0192',
-    packageId: '5-pack',
-    packageName: '5-Session Progressive Blueprint (Session 3/5)',
+    packageId: 'progressive-5',
+    packageName: '5-Session Progressive Blueprint',
     date: '2026-09-02',
     timeSlot: '6:00 PM - 7:00 PM',
     location: 'Bowlero West Covina',
@@ -210,17 +161,17 @@ export const INITIAL_BOOKINGS: CrmBooking[] = [
     status: 'Confirmed',
     paymentStatus: 'Paid',
     price: 275,
-    focusNotes: 'Calibrate foul line flat-spot window & 240fps telemetry review',
-    createdAt: '2026-08-26'
+    focusNotes: '240fps Biomechanical review on 4-step footwork cadence & foul line leverage',
+    createdAt: '2026-08-14'
   },
   {
     id: 'BK-2026-002',
     athleteId: 'CEB-102',
     athleteName: 'Elena Rodriguez',
     athleteEmail: 'elena.rodriguez@example.com',
-    athletePhone: '(626) 555-7841',
-    packageId: 'group-camps',
-    packageName: '4-Week Group Cohort Clinic (Week 2)',
+    athletePhone: '(909) 555-0481',
+    packageId: 'group-clinic',
+    packageName: '4-Week Group Cohort Clinic',
     date: '2026-09-03',
     timeSlot: '7:00 PM - 8:30 PM',
     location: 'Bowlero West Covina',
@@ -230,31 +181,12 @@ export const INITIAL_BOOKINGS: CrmBooking[] = [
     price: 150,
     focusNotes: '3-6-9 Spare mathematical adjustments & plastic spare ball alignment',
     createdAt: '2026-08-26'
-  },
-  {
-    id: 'BK-2026-003',
-    athleteId: 'CEB-103',
-    athleteName: 'Jordan Kim',
-    athleteEmail: 'jordan.kim@example.com',
-    athletePhone: '(909) 555-9012',
-    packageId: 'tune-up',
-    packageName: '60-Minute Mechanical Tune-Up',
-    date: '2026-09-05',
-    timeSlot: '5:00 PM - 6:00 PM',
-    location: 'Bowlero West Covina',
-    laneAssignment: 'Lanes 21-22',
-    status: 'Confirmed',
-    paymentStatus: 'Pending',
-    price: 65,
-    focusNotes: 'Urethane friction control & rev rate sync',
-    createdAt: '2026-08-27'
   }
 ];
 
 export const INITIAL_FINANCIALS: FinancialRecord[] = [
   { id: 'FIN-001', bookingId: 'BK-2026-001', athleteName: 'Marcus Turner', date: '2026-08-14', description: '5-Session Progressive Blueprint Package', packageType: '5-Session Package', amount: 275, status: 'Paid', method: 'Square / Stripe' },
-  { id: 'FIN-002', bookingId: 'BK-2026-002', athleteName: 'Elena Rodriguez', date: '2026-08-21', description: '4-Week Group Cohort Clinic (4 Bowler Tier)', packageType: 'Group Clinic', amount: 150, status: 'Paid', method: 'Square / Stripe' },
-  { id: 'FIN-003', bookingId: 'BK-2026-003', athleteName: 'Jordan Kim', date: '2026-08-27', description: '60-Minute Mechanical Tune-Up', packageType: 'Single Tune-Up', amount: 65, status: 'Pending', method: 'Pending' }
+  { id: 'FIN-002', bookingId: 'BK-2026-002', athleteName: 'Elena Rodriguez', date: '2026-08-21', description: '4-Week Group Cohort Clinic (4 Bowler Tier)', packageType: 'Group Clinic', amount: 150, status: 'Paid', method: 'Square / Stripe' }
 ];
 
 export const getAthletes = (): AthleteProfile[] => {
@@ -270,8 +202,102 @@ export const getAthletes = (): AthleteProfile[] => {
   }
 };
 
+export const fetchCloudAthletes = async (): Promise<AthleteProfile[]> => {
+  try {
+    const { data, error } = await supabase.from('athletes').select('*');
+    if (error || !data || data.length === 0) return getAthletes();
+    
+    // Map snake_case to camelCase
+    const mapped: AthleteProfile[] = data.map((d: any) => ({
+      id: d.id,
+      fullName: d.full_name || d.fullName,
+      email: d.email,
+      phone: d.phone,
+      style: d.style,
+      dominantHand: d.dominant_hand || d.dominantHand,
+      bookAverage: d.book_average || d.bookAverage,
+      careerHighSeries: d.career_high_series || d.careerHighSeries,
+      careerHighGame: d.career_high_game || d.careerHighGame,
+      primaryGoal: d.primary_goal || d.primaryGoal,
+      physicalLimitations: d.physical_limitations || d.physicalLimitations,
+      papCoordinates: d.pap_coordinates || d.papCoordinates,
+      axisTiltDeg: d.axis_tilt_deg || d.axisTiltDeg,
+      axisRotationDeg: d.axis_rotation_deg || d.axisRotationDeg,
+      averageSpeedMph: d.average_speed_mph || d.averageSpeedMph,
+      estimatedRevRateRpm: d.estimated_rev_rate_rpm || d.estimatedRevRateRpm,
+      packageTier: d.package_tier || d.packageTier,
+      sessionsTotal: d.sessions_total || d.sessionsTotal,
+      sessionsCompleted: d.sessions_completed || d.sessionsCompleted,
+      nextSessionDate: d.next_session_date || d.nextSessionDate,
+      nextSessionTime: d.next_session_time || d.nextSessionTime,
+      clinicCohort: d.clinic_cohort || d.clinicCohort,
+      googleDriveFolderUrl: d.google_drive_folder_url || d.googleDriveFolderUrl,
+      arsenal: d.arsenal || [],
+      videos: d.videos || [],
+      drills: d.drills || [],
+      signedWaiverTimestamp: d.signed_waiver_timestamp || d.signedWaiverTimestamp,
+      marketingConsent: d.marketing_consent || d.marketingConsent,
+      isMinor: d.is_minor || d.isMinor,
+      parentGuardianName: d.parent_guardian_name || d.parentGuardianName,
+      emergencyContactName: d.emergency_contact_name || d.emergencyContactName,
+      emergencyContactPhone: d.emergency_contact_phone || d.emergencyContactPhone,
+      createdAt: d.created_at || d.createdAt,
+      lastCoachedAt: d.last_coached_at || d.lastCoachedAt
+    }));
+
+    localStorage.setItem(ATHLETES_STORAGE_KEY, JSON.stringify(mapped));
+    return mapped;
+  } catch (err) {
+    console.error('Supabase fetchAthletes error:', err);
+    return getAthletes();
+  }
+};
+
 export const saveAthletes = (athletes: AthleteProfile[]): void => {
   localStorage.setItem(ATHLETES_STORAGE_KEY, JSON.stringify(athletes));
+  
+  // Async upsert to Supabase
+  athletes.forEach(async (a) => {
+    try {
+      await supabase.from('athletes').upsert({
+        id: a.id,
+        full_name: a.fullName,
+        email: a.email,
+        phone: a.phone,
+        style: a.style,
+        dominant_hand: a.dominantHand,
+        book_average: a.bookAverage,
+        career_high_series: a.careerHighSeries,
+        career_high_game: a.careerHighGame,
+        primary_goal: a.primaryGoal,
+        physical_limitations: a.physicalLimitations,
+        pap_coordinates: a.papCoordinates,
+        axis_tilt_deg: a.axisTiltDeg,
+        axis_rotation_deg: a.axisRotationDeg,
+        average_speed_mph: a.averageSpeedMph,
+        estimated_rev_rate_rpm: a.estimatedRevRateRpm,
+        package_tier: a.packageTier,
+        sessions_total: a.sessionsTotal,
+        sessions_completed: a.sessionsCompleted,
+        next_session_date: a.nextSessionDate,
+        next_session_time: a.nextSessionTime,
+        clinic_cohort: a.clinicCohort,
+        google_drive_folder_url: a.googleDriveFolderUrl,
+        arsenal: a.arsenal,
+        videos: a.videos,
+        drills: a.drills,
+        signed_waiver_timestamp: a.signedWaiverTimestamp,
+        marketing_consent: a.marketingConsent,
+        is_minor: a.isMinor,
+        parent_guardian_name: a.parentGuardianName,
+        emergency_contact_name: a.emergencyContactName,
+        emergency_contact_phone: a.emergencyContactPhone,
+        last_coached_at: a.lastCoachedAt
+      });
+    } catch (err) {
+      console.error('Supabase upsert athlete error:', err);
+    }
+  });
 };
 
 export const getBookings = (): CrmBooking[] => {
@@ -287,8 +313,64 @@ export const getBookings = (): CrmBooking[] => {
   }
 };
 
+export const fetchCloudBookings = async (): Promise<CrmBooking[]> => {
+  try {
+    const { data, error } = await supabase.from('bookings').select('*');
+    if (error || !data || data.length === 0) return getBookings();
+
+    const mapped: CrmBooking[] = data.map((d: any) => ({
+      id: d.id,
+      athleteId: d.athlete_id || d.athleteId,
+      athleteName: d.athlete_name || d.athleteName,
+      athleteEmail: d.athlete_email || d.athleteEmail,
+      athletePhone: d.athlete_phone || d.athletePhone,
+      packageId: d.package_id || d.packageId,
+      packageName: d.package_name || d.packageName,
+      date: d.date,
+      timeSlot: d.time_slot || d.timeSlot,
+      location: d.location,
+      laneAssignment: d.lane_assignment || d.laneAssignment,
+      status: d.status,
+      paymentStatus: d.payment_status || d.paymentStatus,
+      price: d.price,
+      focusNotes: d.focus_notes || d.focusNotes,
+      createdAt: d.created_at || d.createdAt
+    }));
+
+    localStorage.setItem(BOOKINGS_STORAGE_KEY, JSON.stringify(mapped));
+    return mapped;
+  } catch (err) {
+    console.error('Supabase fetchBookings error:', err);
+    return getBookings();
+  }
+};
+
 export const saveBookings = (bookings: CrmBooking[]): void => {
   localStorage.setItem(BOOKINGS_STORAGE_KEY, JSON.stringify(bookings));
+
+  bookings.forEach(async (b) => {
+    try {
+      await supabase.from('bookings').upsert({
+        id: b.id,
+        athlete_id: b.athleteId,
+        athlete_name: b.athleteName,
+        athlete_email: b.athleteEmail,
+        athlete_phone: b.athletePhone,
+        package_id: b.packageId,
+        package_name: b.packageName,
+        date: b.date,
+        time_slot: b.timeSlot,
+        location: b.location,
+        lane_assignment: b.laneAssignment,
+        status: b.status,
+        payment_status: b.paymentStatus,
+        price: b.price,
+        focus_notes: b.focusNotes
+      });
+    } catch (err) {
+      console.error('Supabase upsert booking error:', err);
+    }
+  });
 };
 
 export const getFinancials = (): FinancialRecord[] => {
@@ -309,7 +391,7 @@ export const syncDiagnosticToCrm = (data: DiagnosticData): AthleteProfile => {
   const existingIdx = athletes.findIndex((a) => a.email.toLowerCase() === data.email.toLowerCase());
   
   const cleanId = existingIdx >= 0 ? athletes[existingIdx].id : `CEB-${100 + athletes.length + 1}`;
-  const driveFolderUrl = `https://drive.google.com/drive/folders/ceb-${cleanId.toLowerCase()}-${encodeURIComponent(data.fullName.toLowerCase().replace(/\s+/g, '-'))}`;
+  const driveFolderUrl = existingIdx >= 0 ? athletes[existingIdx].googleDriveFolderUrl : `https://drive.google.com/drive/folders/19G4eW24NYDv4VXaEKbtbs-9MuerV1HJQ`;
   
   const updatedProfile: AthleteProfile = {
     id: cleanId,
@@ -351,7 +433,7 @@ export const syncDiagnosticToCrm = (data: DiagnosticData): AthleteProfile => {
 
   saveAthletes(athletes);
 
-  // Trigger Google Drive Webhook to automatically create student folder
+  // Trigger Google Drive Webhook to create folder + Doc
   triggerDriveWebhook({
     fullName: updatedProfile.fullName,
     studentId: updatedProfile.id,
@@ -363,7 +445,6 @@ export const syncDiagnosticToCrm = (data: DiagnosticData): AthleteProfile => {
 
   return updatedProfile;
 };
-
 
 export const syncBookingToCrm = (bookingInfo: {
   athleteName: string;
@@ -481,6 +562,14 @@ export const generateLockerOtp = (email: string): string => {
     expiresAt: Date.now() + 15 * 60 * 1000
   };
   localStorage.setItem(OTP_STORE_KEY, JSON.stringify(store));
+
+  // Also store in Supabase otp_tokens table asynchronously
+  supabase.from('otp_tokens').upsert({
+    email: email.toLowerCase(),
+    code: code,
+    expires_at: Date.now() + 15 * 60 * 1000
+  }).then();
+
   return code;
 };
 
@@ -490,10 +579,12 @@ export const verifyLockerOtp = (email: string, enteredCode: string): boolean => 
   try {
     const store = JSON.parse(localStorage.getItem(OTP_STORE_KEY) || '{}');
     const record = store[email.toLowerCase()];
-    if (!record) return false;
-    if (Date.now() > record.expiresAt) return false;
-    return record.code === enteredCode.trim();
+    if (record && record.code === enteredCode && record.expiresAt > Date.now()) {
+      return true;
+    }
   } catch {
-    return false;
+    // fallback
   }
+
+  return false;
 };

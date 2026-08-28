@@ -29,6 +29,8 @@ import {
   getFinancials,
   generateGoogleCalendarUrl,
   triggerDriveWebhook,
+  fetchCloudAthletes,
+  fetchCloudBookings,
   GOOGLE_APPS_SCRIPT_WEBHOOK_URL
 } from '../../services/crmStorage';
 import { CrmCalendarView } from './CrmCalendarView';
@@ -47,6 +49,11 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
   const [athletes, setAthletes] = useState<AthleteProfile[]>(getAthletes());
   const [bookings, setBookings] = useState<CrmBooking[]>(getBookings());
   const [financials] = useState<FinancialRecord[]>(getFinancials());
+
+  React.useEffect(() => {
+    fetchCloudAthletes().then((data) => { if (data && data.length > 0) setAthletes(data); });
+    fetchCloudBookings().then((data) => { if (data && data.length > 0) setBookings(data); });
+  }, []);
 
 
   const [searchQuery, setSearchQuery] = useState<string>('');
