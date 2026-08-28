@@ -6,7 +6,8 @@ const BOOKINGS_STORAGE_KEY = 'ceb_crm_bookings_v2';
 const FINANCIALS_STORAGE_KEY = 'ceb_crm_financials_v2';
 const OTP_STORE_KEY = 'ceb_otp_store_v2';
 
-export const GOOGLE_APPS_SCRIPT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbyvR2Yx8qYbjI660F40eWBut73vTXQEdNpCoJ71dsvAsdWNMoO_BGabxVc0QFTUbHlv/exec';
+export const GOOGLE_APPS_SCRIPT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwYIq4gHYy0noasu_dGNtSxMS72y2xfJv87eunOiqUjLFnxYFzTHgOYf662-fuFFJF_/exec';
+
 
 export const triggerDriveWebhook = async (payload: {
   fullName: string;
