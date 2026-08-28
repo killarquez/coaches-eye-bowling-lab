@@ -12,11 +12,15 @@ import {
   ArrowRight,
   ArrowLeft,
   MapPin,
-  Video
+  Video,
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
+
 
 import confetti from 'canvas-confetti';
 import type { DiagnosticData } from '../types';
+import { WaiverModal } from './WaiverModal';
 
 interface DiagnosticFormProps {
   initialPackageId?: string;
@@ -38,11 +42,17 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
     arsenalTypes: ['Solid Reactive', 'Pearl Reactive', 'Plastic Spare'],
     physicalLimitations: 'None',
     primaryGoal: 'Timing, Leverage & Foul Line Balance',
-    preferredDays: ['Weekday Evenings', 'Weekend Mornings']
+    preferredDays: ['Weekday Evenings', 'Weekend Mornings'],
+    emergencyContactName: '',
+    emergencyContactPhone: '',
+    liabilityConsent: false,
+    videoConsent: true,
+    signedTimestamp: ''
   });
 
   const [step, setStep] = useState<number>(1);
   const [submitted, setSubmitted] = useState<boolean>(false);
+  const [showWaiverModal, setShowWaiverModal] = useState<boolean>(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const ballOptions = [
@@ -94,6 +104,24 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
     e.preventDefault();
     if (step === 1 && !validateStep1()) return;
 
+    if (!formData.liabilityConsent) {
+      setErrors((prev) => ({
+        ...prev,
+        liability: 'You must read and accept the Athletic Liability Waiver to complete registration.'
+      }));
+      return;
+    }
+
+    const timestamp = new Date().toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    setFormData((prev) => ({ ...prev, signedTimestamp: timestamp }));
     setSubmitted(true);
     try {
       confetti({
@@ -105,6 +133,7 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
       // fallback
     }
   };
+
 
   return (
     <div className="card-usbc rounded-3xl border-2 border-slate-300 shadow-xl overflow-hidden bg-white w-full">
@@ -442,6 +471,114 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
                 </select>
               </div>
 
+              {/* ATHLETE LIABILITY WAIVER & VIDEO CONSENT AGREEMENT CARD */}
+              <div className="bg-slate-50 border-2 border-slate-300 rounded-2xl p-5 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-[#c8102e]" />
+                    <span className="text-xs sm:text-sm font-bold text-[#00205b] uppercase font-display">
+                      Athlete Safety & Liability Agreement
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowWaiverModal(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#c8102e] hover:underline cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>View Full Waiver Document</span>
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed font-body">
+                  Participation in athletic bowling instruction at Bowlero West Covina involves physical exertion, slide footwork, and heavy ball acceleration. Please review and accept the terms below:
+                </p>
+
+                {/* Consent Checkboxes */}
+                <div className="space-y-3 pt-1">
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={formData.liabilityConsent}
+                      onChange={(e) => {
+                        setFormData({ ...formData, liabilityConsent: e.target.checked });
+                        if (e.target.checked && errors.liability) {
+                          setErrors((prev) => {
+                            const copy = { ...prev };
+                            delete copy.liability;
+                            return copy;
+                          });
+                        }
+                      }}
+                      className="w-4 h-4 mt-0.5 rounded border-slate-300 text-[#00205b] focus:ring-[#00205b] cursor-pointer shrink-0"
+                    />
+                    <span className="text-xs text-slate-800 leading-snug font-medium">
+                      <strong className="text-[#00205b]">Required:</strong> I have read, understand, and agree to the{' '}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowWaiverModal(true);
+                        }}
+                        className="text-[#c8102e] font-bold underline hover:text-[#a60d24]"
+                      >
+                        Athletic Liability Waiver, Inherent Risk Assumption, and Release of Claims
+                      </button>{' '}
+                      for Coach Alfredo Quilarquez & Bowlero West Covina.
+                    </span>
+                  </label>
+
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={formData.videoConsent}
+                      onChange={(e) => setFormData({ ...formData, videoConsent: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 rounded border-slate-300 text-[#00205b] focus:ring-[#00205b] cursor-pointer shrink-0"
+                    />
+                    <span className="text-xs text-slate-800 leading-snug font-medium">
+                      <strong className="text-[#00205b]">Required:</strong> I consent to 240fps slow-motion multi-angle video recording strictly for biomechanical diagnosis and technique review.
+                    </span>
+                  </label>
+                </div>
+
+                {errors.liability && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-600 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{errors.liability}</span>
+                  </div>
+                )}
+
+                {/* Optional Emergency Contact */}
+                <div className="pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase mb-1">
+                      Emergency Contact Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.emergencyContactName}
+                      onChange={(e) => setFormData({ ...formData, emergencyContactName: e.target.value })}
+                      placeholder="e.g. Parent / Spouse Name"
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:border-[#00205b] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase mb-1">
+                      Emergency Contact Phone (Optional)
+                    </label>
+                    <input
+                      type="tel"
+                      value={formData.emergencyContactPhone}
+                      onChange={(e) => setFormData({ ...formData, emergencyContactPhone: e.target.value })}
+                      placeholder="(909) 000-0000"
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:border-[#00205b] focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+              </div>
+
               {/* STEP 3 SUBMIT ACTION BUTTON */}
               <div className="pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <button
@@ -539,6 +676,17 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
               </div>
             </div>
 
+            {/* Signed Waiver & Safety Badge */}
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-900">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-bold">Athletic Liability Waiver & Video Consent: Signed</span>
+              </div>
+              <span className="text-emerald-700 text-[11px] font-mono font-medium">
+                {formData.signedTimestamp || 'Active'}
+              </span>
+            </div>
+
             {/* Coach's Automated Pre-Session Strategy Insight */}
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-xs">
               <div className="font-bold text-[#00205b] uppercase mb-1 flex items-center gap-1.5">
@@ -580,6 +728,25 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
       )}
 
       </div>
+
+      {/* Global Waiver Modal */}
+      <WaiverModal
+        isOpen={showWaiverModal}
+        onClose={() => setShowWaiverModal(false)}
+        onAccept={() => {
+          setFormData((prev) => ({
+            ...prev,
+            liabilityConsent: true,
+            videoConsent: true
+          }));
+          setErrors((prev) => {
+            const copy = { ...prev };
+            delete copy.liability;
+            return copy;
+          });
+        }}
+      />
     </div>
   );
 };
+

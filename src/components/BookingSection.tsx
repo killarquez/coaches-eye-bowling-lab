@@ -197,10 +197,11 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                 <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-center justify-between text-emerald-900 font-semibold">
                   <span className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Baseline attached: {diagnosticData.fullName}</span>
+                    <span>Baseline & Signed Waiver: {diagnosticData.fullName}</span>
                   </span>
-                  <span className="text-[10px] uppercase font-bold bg-emerald-100 px-2 py-0.5 rounded">SYNCED</span>
+                  <span className="text-[10px] uppercase font-bold bg-emerald-100 px-2 py-0.5 rounded">SYNCED & WAIVER ON FILE</span>
                 </div>
+
               ) : (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between text-amber-900 font-semibold">
                   <span>Diagnostic assessment not yet filled</span>

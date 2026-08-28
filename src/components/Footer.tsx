@@ -8,6 +8,7 @@ import {
   Phone
 } from 'lucide-react';
 import { COACH_INFO } from '../data/coachingData';
+import { WaiverModal } from './WaiverModal';
 
 interface FooterProps {
   onNavClick: (id: string) => void;
@@ -17,6 +18,8 @@ interface FooterProps {
 export const Footer: React.FC<FooterProps> = ({ onNavClick, onOpenDiagnostic }) => {
   const [emailSubscribed, setEmailSubscribed] = useState(false);
   const [newsletterEmail, setNewsletterEmail] = useState('');
+  const [showWaiverModal, setShowWaiverModal] = useState(false);
+
 
   const handleNewsletter = (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,7 +208,14 @@ export const Footer: React.FC<FooterProps> = ({ onNavClick, onOpenDiagnostic }) 
             © {new Date().getFullYear()} Alfredo Quilarquez Bowling. All Rights Reserved.
           </div>
 
-          <div className="flex items-center gap-4 font-semibold">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 font-semibold">
+            <button
+              onClick={() => setShowWaiverModal(true)}
+              className="text-[#c39d5e] hover:underline cursor-pointer transition-colors"
+            >
+              Athletic Liability Waiver & Consent
+            </button>
+            <span>•</span>
             <span>Bowlero West Covina, CA</span>
             <span>•</span>
             <span>USBC Level 1 & PBA Member</span>
@@ -213,6 +223,13 @@ export const Footer: React.FC<FooterProps> = ({ onNavClick, onOpenDiagnostic }) 
         </div>
 
       </div>
+
+      {/* Global Waiver Modal */}
+      <WaiverModal
+        isOpen={showWaiverModal}
+        onClose={() => setShowWaiverModal(false)}
+      />
     </footer>
   );
 };
+

@@ -35,7 +35,13 @@ export interface DiagnosticData {
   physicalLimitations: string;
   primaryGoal: string;
   preferredDays: string[];
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  liabilityConsent: boolean;
+  videoConsent: boolean;
+  signedTimestamp?: string;
 }
+
 
 export interface ProShopPartner {
   name: string;
