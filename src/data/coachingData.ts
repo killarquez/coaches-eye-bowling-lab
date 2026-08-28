@@ -6,7 +6,8 @@ export const COACH_INFO = {
   locationName: "Bowlero West Covina",
   address: "675 S Glendora Ave, West Covina, CA 91790",
   phone: "(909) 766-2710",
-  email: "coaching@alfredobowling.com",
+  email: "coach@cebowlinglab.com",
+
 
 
   instagram: "@alfredoquilarquez_bowling",
