@@ -21,6 +21,8 @@ import {
 import confetti from 'canvas-confetti';
 import type { DiagnosticData } from '../types';
 import { WaiverModal } from './WaiverModal';
+import { syncDiagnosticToCrm } from '../services/crmStorage';
+
 
 export const formatPhoneNumber = (value: string): string => {
   if (!value) return '';
@@ -152,7 +154,9 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
       hour12: true
     });
 
-    setFormData((prev) => ({ ...prev, signedTimestamp: timestamp }));
+    const updatedData = { ...formData, signedTimestamp: timestamp };
+    setFormData(updatedData);
+    syncDiagnosticToCrm(updatedData);
     setSubmitted(true);
     try {
       confetti({
@@ -164,6 +168,7 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
       // fallback
     }
   };
+
 
 
 

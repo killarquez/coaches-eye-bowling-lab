@@ -27,9 +27,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenD
     { id: 'packages', label: 'Coaching Packages' },
     { id: 'biomechanics', label: 'Biomechanics Lab' },
     { id: 'booking', label: 'Book & Diagnostic' },
+    { id: 'locker', label: 'Bowler Locker' },
     { id: 'pro-shop', label: 'Pro Shop Partners' },
     { id: 'faq', label: 'FAQ & Location' },
   ];
+
 
   const handleNavClick = (id: string) => {
     setActiveTab(id);
@@ -61,22 +63,34 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onOpenD
 
           {/* Right info items - perfectly aligned */}
           <div className="flex items-center gap-4 sm:gap-6 text-slate-700">
+            <button
+              onClick={() => handleNavClick('locker')}
+              className="text-xs font-bold text-[#00205b] hover:text-[#c8102e] flex items-center gap-1.5 cursor-pointer py-0.5 transition-colors"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span>Bowler Locker (OTP)</span>
+            </button>
+
+            <span className="text-slate-300">•</span>
+
+            <button
+              onClick={() => handleNavClick('admin')}
+              className="text-xs font-bold text-slate-600 hover:text-[#00205b] flex items-center gap-1.5 cursor-pointer py-0.5 transition-colors"
+            >
+              <span>Coach CRM</span>
+            </button>
+
+            <span className="hidden lg:inline text-slate-300">•</span>
+
             <span className="hidden lg:flex items-center gap-1.5 font-medium">
               <Phone className="w-3.5 h-3.5 text-[#c8102e] shrink-0" />
               <span>Direct: <strong className="text-slate-900 font-bold">{COACH_INFO.phone}</strong></span>
             </span>
-
-            <button
-              onClick={onOpenDiagnostic}
-              className="text-xs font-bold text-[#00205b] hover:text-[#c8102e] flex items-center gap-1.5 cursor-pointer py-0.5 transition-colors"
-            >
-              <FileCheck className="w-3.5 h-3.5 text-[#c8102e]" />
-              <span>Free Diagnostic Form</span>
-            </button>
           </div>
 
         </div>
       </div>
+
 
       {/* Main Clean White Navigation Bar with Roomy Height and Exact Alignment */}
       <header className="bg-white">

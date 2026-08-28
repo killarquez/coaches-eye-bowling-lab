@@ -11,6 +11,8 @@ import confetti from 'canvas-confetti';
 import { COACH_INFO, COACHING_PACKAGES } from '../data/coachingData';
 import type { CoachingPackage, DiagnosticData } from '../types';
 import { formatPhoneNumber } from './DiagnosticForm';
+import { syncBookingToCrm } from '../services/crmStorage';
+
 
 interface BookingSectionProps {
   selectedPackage?: CoachingPackage | null;
@@ -56,6 +58,17 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
 
   const handleConfirmReservation = (e: React.FormEvent) => {
     e.preventDefault();
+    syncBookingToCrm({
+      athleteName: diagnosticData?.fullName || 'Registered Student',
+      athleteEmail: diagnosticData?.email || 'student@example.com',
+      athletePhone: bookerPhone || diagnosticData?.phone || '(909) 766-2710',
+      packageId: currentPkg.id,
+      packageName: currentPkg.title,
+      date: selectedDate,
+      timeSlot: selectedTimeSlot,
+      price: effectivePrice,
+      notes: `Booked online for ${currentPkg.title}`
+    });
     setBookingConfirmed(true);
     try {
       confetti({
@@ -67,6 +80,7 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
       // fallback
     }
   };
+
 
   return (
     <div className="space-y-16">

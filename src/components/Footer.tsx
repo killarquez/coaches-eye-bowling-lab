@@ -120,15 +120,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavClick, onOpenDiagnostic }) 
               </li>
               <li>
                 <button 
-                  onClick={() => onNavClick('faq')}
-                  className="text-slate-200 hover:text-amber-400 transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ChevronRight className="w-3 h-3 text-red-400" />
-                  <span>FAQ & Facility Location</span>
-                </button>
-              </li>
-              <li>
-                <button 
                   onClick={onOpenDiagnostic}
                   className="text-amber-300 font-bold hover:underline transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
@@ -136,8 +127,28 @@ export const Footer: React.FC<FooterProps> = ({ onNavClick, onOpenDiagnostic }) 
                   <span>Preliminary Diagnostic Form</span>
                 </button>
               </li>
+              <li>
+                <button 
+                  onClick={() => onNavClick('locker')}
+                  className="text-[#c39d5e] hover:underline transition-colors flex items-center gap-1.5 cursor-pointer font-bold"
+                >
+                  <ChevronRight className="w-3 h-3 text-[#c8102e]" />
+                  <span>Bowler Locker Room (OTP Login)</span>
+                </button>
+              </li>
+              <li>
+                <button 
+                  onClick={() => onNavClick('admin')}
+                  className="text-slate-300 hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ChevronRight className="w-3 h-3 text-slate-400" />
+                  <span>Coach Command Center & CRM</span>
+                </button>
+              </li>
             </ul>
           </div>
+
+
 
           {/* Col 3: Location & Clinic Updates */}
           <div className="lg:col-span-4 space-y-4 text-left">

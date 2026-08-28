@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { StatsBanner } from './components/StatsBanner';
@@ -15,6 +15,8 @@ import { Testimonials } from './components/Testimonials';
 import { FAQSection } from './components/FAQSection';
 import { Footer } from './components/Footer';
 import { MobileQuickBar } from './components/MobileQuickBar';
+import { BowlerLocker } from './components/crm/BowlerLocker';
+import { CoachDashboard } from './components/crm/CoachDashboard';
 import type { CoachingPackage, DiagnosticData } from './types';
 import { COACHING_PACKAGES } from './data/coachingData';
 import { 
@@ -33,11 +35,29 @@ export function App() {
   const [selectedPackage, setSelectedPackage] = useState<CoachingPackage | null>(COACHING_PACKAGES[0]);
   const [diagnosticData, setDiagnosticData] = useState<DiagnosticData | null>(null);
 
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.toLowerCase();
+      if (hash === '#admin' || hash === '#dashboard') {
+        setActiveTab('admin');
+      } else if (hash === '#locker' || hash === '#my-locker') {
+        setActiveTab('locker');
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
   const navigateToTab = (tab: string, pkg?: CoachingPackage) => {
     if (pkg) setSelectedPackage(pkg);
     setActiveTab(tab);
+    if (tab === 'admin') window.location.hash = 'admin';
+    else if (tab === 'locker') window.location.hash = 'locker';
+    else if (window.location.hash) history.pushState('', document.title, window.location.pathname);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
 
   const handleOpenDiagnostic = (packageId?: string) => {
     if (packageId) {
@@ -337,7 +357,27 @@ export function App() {
           </div>
         )}
 
+        {/* ========================================================================= */}
+        {/* PAGE 8: ATHLETE BOWLER LOCKER ROOM (OTP VERIFIED) */}
+        {/* ========================================================================= */}
+        {activeTab === 'locker' && (
+          <div className="py-12 sm:py-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-in fade-in duration-200">
+            <BowlerLocker onClose={() => navigateToTab('home')} />
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* PAGE 9: COACH COMMAND CENTER & CRM */}
+        {/* ========================================================================= */}
+        {activeTab === 'admin' && (
+          <div className="py-12 sm:py-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-in fade-in duration-200">
+            <CoachDashboard onClose={() => navigateToTab('home')} />
+          </div>
+        )}
+
       </main>
+
+
 
       {/* Global Footer */}
       <Footer
