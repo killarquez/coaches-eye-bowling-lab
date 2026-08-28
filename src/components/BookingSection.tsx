@@ -10,6 +10,7 @@ import {
 import confetti from 'canvas-confetti';
 import { COACH_INFO, COACHING_PACKAGES } from '../data/coachingData';
 import type { CoachingPackage, DiagnosticData } from '../types';
+import { formatPhoneNumber } from './DiagnosticForm';
 
 interface BookingSectionProps {
   selectedPackage?: CoachingPackage | null;
@@ -28,8 +29,10 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
   const [selectedGroupTierIndex, setSelectedGroupTierIndex] = useState<number>(0);
   const [selectedDate, setSelectedDate] = useState<string>('Tomorrow, 6:00 PM');
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('6:00 PM - 7:00 PM');
+  const [bookerPhone, setBookerPhone] = useState<string>(diagnosticData?.phone || '');
   const [useCalendlyEmbed, setUseCalendlyEmbed] = useState<boolean>(false);
   const [bookingConfirmed, setBookingConfirmed] = useState<boolean>(false);
+
 
   const currentPkg = COACHING_PACKAGES.find((p) => p.id === activePackageId) || COACHING_PACKAGES[0];
   
@@ -357,33 +360,49 @@ export const BookingSection: React.FC<BookingSectionProps> = ({
                   </div>
 
                   {/* Student Details */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-1">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                        Bowler / Group Lead Name *
+                        Bowler / Lead Name *
                       </label>
                       <input
                         type="text"
                         required
                         defaultValue={diagnosticData?.fullName || ''}
                         placeholder="Your Full Name"
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3.5 px-4 text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3 px-3.5 text-xs sm:text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none"
                       />
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
-                        Confirmation Email *
+                        Email Address *
                       </label>
                       <input
                         type="email"
                         required
                         defaultValue={diagnosticData?.email || ''}
                         placeholder="your.email@domain.com"
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3.5 px-4 text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3 px-3.5 text-xs sm:text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+                        Mobile Phone (SMS) *
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        maxLength={14}
+                        value={bookerPhone}
+                        onChange={(e) => setBookerPhone(formatPhoneNumber(e.target.value))}
+                        placeholder="(909) 766-2710"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3 px-3.5 text-xs sm:text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none font-mono"
                       />
                     </div>
                   </div>
+
 
                   {/* Session Notes */}
                   <div>

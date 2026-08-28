@@ -5,8 +5,9 @@ export const COACH_INFO = {
   title: "USBC Level 1 Certified Coach & PBA Regional Competitor",
   locationName: "Bowlero West Covina",
   address: "675 S Glendora Ave, West Covina, CA 91790",
-  phone: "(909) 764-4824",
+  phone: "(909) 766-2710",
   email: "coaching@alfredobowling.com",
+
 
   instagram: "@alfredoquilarquez_bowling",
   calendlyUrl: "https://calendly.com", // standard embed or simulated direct calendar

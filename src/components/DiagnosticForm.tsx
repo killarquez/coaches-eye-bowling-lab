@@ -22,6 +22,19 @@ import confetti from 'canvas-confetti';
 import type { DiagnosticData } from '../types';
 import { WaiverModal } from './WaiverModal';
 
+export const formatPhoneNumber = (value: string): string => {
+  if (!value) return '';
+  const digits = value.replace(/\D/g, '');
+  if (digits.length === 0) return '';
+  if (digits.length <= 3) {
+    return `(${digits}`;
+  }
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  }
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+};
+
 interface DiagnosticFormProps {
   initialPackageId?: string;
   onProceedToBooking: (diagnosticData: DiagnosticData) => void;
@@ -91,10 +104,16 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
     const errs: Record<string, string> = {};
     if (!formData.fullName.trim()) errs.fullName = 'Full Name is required';
     if (!formData.email.trim() || !formData.email.includes('@')) errs.email = 'Valid email is required';
-    if (!formData.phone.trim()) errs.phone = 'Phone number is required for booking text reminders';
+    const digits = formData.phone.replace(/\D/g, '');
+    if (!formData.phone.trim()) {
+      errs.phone = 'Phone number is required for booking text reminders';
+    } else if (digits.length < 10) {
+      errs.phone = 'Please enter a full 10-digit phone number: (XXX) XXX-XXXX';
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
+
 
   const handleNext = () => {
     if (step === 1) {
@@ -289,12 +308,14 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
                   <input
                     type="tel"
                     required
+                    maxLength={14}
                     value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="(909) 764-4824"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none"
+                    onChange={(e) => setFormData({ ...formData, phone: formatPhoneNumber(e.target.value) })}
+                    placeholder="(909) 766-2710"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none font-mono font-medium"
                   />
                 </div>
+
 
                 {errors.phone && <p className="text-xs text-red-600 mt-1 font-bold">{errors.phone}</p>}
               </div>
@@ -677,13 +698,15 @@ export const DiagnosticForm: React.FC<DiagnosticFormProps> = ({
                     </label>
                     <input
                       type="tel"
+                      maxLength={14}
                       value={formData.emergencyContactPhone}
-                      onChange={(e) => setFormData({ ...formData, emergencyContactPhone: e.target.value })}
-                      placeholder="(909) 000-0000"
-                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:border-[#00205b] focus:outline-none"
+                      onChange={(e) => setFormData({ ...formData, emergencyContactPhone: formatPhoneNumber(e.target.value) })}
+                      placeholder="(909) 766-2710"
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 focus:border-[#00205b] focus:outline-none font-mono"
                     />
                   </div>
                 </div>
+
 
               </div>
 
