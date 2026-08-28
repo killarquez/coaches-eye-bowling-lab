@@ -50,6 +50,7 @@ export interface AthleteProfile {
 
   // Package & Training History
   packageTier: string; // e.g. "5-Session Progressive Blueprint"
+  status?: 'Prospect' | 'Active' | 'Alumni';
   sessionsTotal: number;
   sessionsCompleted: number;
   nextSessionDate?: string;

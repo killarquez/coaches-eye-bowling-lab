@@ -52,6 +52,7 @@ export const INITIAL_ATHLETES: AthleteProfile[] = [
     averageSpeedMph: 16.2,
     estimatedRevRateRpm: 460,
     packageTier: '5-Session Progressive Blueprint',
+    status: 'Active',
     sessionsTotal: 5,
     sessionsCompleted: 2,
     nextSessionDate: '2026-09-02',
@@ -112,6 +113,7 @@ export const INITIAL_ATHLETES: AthleteProfile[] = [
     averageSpeedMph: 14.5,
     estimatedRevRateRpm: 280,
     packageTier: '4-Week Group Cohort Clinic',
+    status: 'Active',
     sessionsTotal: 4,
     sessionsCompleted: 1,
     nextSessionDate: '2026-09-03',
@@ -404,8 +406,9 @@ export const syncDiagnosticToCrm = (data: DiagnosticData): AthleteProfile => {
     careerHighSeries: parseInt(data.highSeries) || 600,
     primaryGoal: data.primaryGoal,
     physicalLimitations: data.physicalLimitations || 'None',
-    packageTier: 'Diagnostic Registered (Pending Booking)',
-    sessionsTotal: 1,
+    packageTier: 'Diagnostic Evaluation Completed (Inbound Prospect)',
+    status: 'Prospect',
+    sessionsTotal: 0,
     sessionsCompleted: 0,
     googleDriveFolderUrl: driveFolderUrl,
     arsenal: data.arsenalTypes.map((type) => ({
@@ -504,6 +507,9 @@ export const syncBookingToCrm = (bookingInfo: {
   bookings.unshift(newBooking);
   saveBookings(bookings);
 
+  athlete.status = 'Active';
+  athlete.packageTier = newBooking.packageName;
+  if (athlete.sessionsTotal === 0) athlete.sessionsTotal = newBooking.packageName.includes('5-Session') ? 5 : newBooking.packageName.includes('4-Week') ? 4 : 1;
   athlete.nextSessionDate = newBooking.date;
   athlete.nextSessionTime = newBooking.timeSlot;
   saveAthletes(getAthletes().map((a) => (a.id === athlete?.id ? athlete : a)));

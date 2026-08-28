@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { 
   ShieldCheck, 
+  PhoneCall, 
+  Send, 
   Lock, 
   Calendar as CalendarIcon, 
   DollarSign, 
-  TrendingUp, 
   Users, 
   Video, 
   Search, 
@@ -20,6 +21,7 @@ import {
   Download, 
   ArrowRight
 } from 'lucide-react';
+
 import type { AthleteProfile, CrmBooking, FinancialRecord } from '../../types/crm';
 import { 
   getAthletes, 
@@ -81,7 +83,9 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
 
   const totalRevenue = financials.reduce((acc, curr) => (curr.status === 'Paid' ? acc + curr.amount : acc), 0);
   const upcomingCount = bookings.filter((b) => b.status === 'Confirmed').length;
-  const activeAthletesCount = athletes.length;
+  const activeAthletesCount = athletes.filter((a) => a.status === 'Active' || a.sessionsTotal > 0).length;
+  const prospectsCount = athletes.filter((a) => a.status === 'Prospect' || a.sessionsTotal === 0).length;
+  const [pipelineFilter, setPipelineFilter] = useState<'all' | 'active' | 'prospects'>('all');
 
   const handleAddBooking = (newBookingData: Partial<CrmBooking>) => {
     const fullBooking: CrmBooking = {
@@ -267,12 +271,21 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
           {/* Executive Metrics Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="card-usbc p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-1">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">Active Athletes</span>
+              <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">Active On-Lane Athletes</span>
               <div className="flex items-center justify-between">
                 <span className="font-display text-2xl sm:text-3xl font-black text-[#00205b]">{activeAthletesCount}</span>
                 <Users className="w-6 h-6 text-blue-500 opacity-80" />
               </div>
-              <span className="text-[11px] font-medium text-emerald-600">100% on-lane Bowlero active</span>
+              <span className="text-[11px] font-medium text-emerald-600">Active Package Bowlers</span>
+            </div>
+
+            <div className="card-usbc p-5 rounded-2xl border border-amber-200 bg-amber-50/50 shadow-xs space-y-1 cursor-pointer" onClick={() => { setActiveTab('athletes'); setPipelineFilter('prospects'); }}>
+              <span className="text-[10px] font-bold uppercase text-amber-700 block tracking-wider">Inbound Prospects</span>
+              <div className="flex items-center justify-between">
+                <span className="font-display text-2xl sm:text-3xl font-black text-[#c39d5e]">{prospectsCount}</span>
+                <Sparkles className="w-6 h-6 text-amber-500 opacity-90" />
+              </div>
+              <span className="text-[11px] font-bold text-amber-800">Ready for Outreach & Booking</span>
             </div>
 
             <div className="card-usbc p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-1">
@@ -281,7 +294,7 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
                 <span className="font-display text-2xl sm:text-3xl font-black text-[#c8102e]">${totalRevenue}</span>
                 <DollarSign className="w-6 h-6 text-emerald-600 opacity-80" />
               </div>
-              <span className="text-[11px] font-medium text-slate-500">Packages & Clinics</span>
+              <span className="text-[11px] font-medium text-slate-500">Collected Sessions</span>
             </div>
 
             <div className="card-usbc p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-1">
@@ -291,15 +304,6 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
                 <CalendarIcon className="w-6 h-6 text-[#c8102e] opacity-80" />
               </div>
               <span className="text-[11px] font-medium text-slate-500">Bowlero West Covina</span>
-            </div>
-
-            <div className="card-usbc p-5 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-1">
-              <span className="text-[10px] font-bold uppercase text-slate-400 block tracking-wider">Average Improvement</span>
-              <div className="flex items-center justify-between">
-                <span className="font-display text-2xl sm:text-3xl font-black text-emerald-700">+18.4</span>
-                <TrendingUp className="w-6 h-6 text-emerald-600 opacity-80" />
-              </div>
-              <span className="text-[11px] font-medium text-emerald-700 font-bold">Pins per League Series</span>
             </div>
           </div>
 
@@ -476,27 +480,59 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
             />
           )}
 
-          {/* TAB 3: ATHLETES DIRECTORY & 240FPS TELEMETRY */}
+          {/* TAB 3: ATHLETES DIRECTORY & PROSPECT OUTREACH PIPELINE */}
           {activeTab === 'athletes' && (
-            <div className="space-y-4">
+            <div className="space-y-5">
               
-              <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="relative w-full sm:w-80">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by name, email, or ID..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl py-2.5 pl-10 pr-4 text-xs text-slate-900 focus:border-[#00205b] focus:bg-white focus:outline-none"
-                  />
+              {/* Pipeline Category Switcher Tabs */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPipelineFilter('all')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      pipelineFilter === 'all' ? 'bg-[#00205b] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    All Athletes & Leads ({athletes.length})
+                  </button>
+
+                  <button
+                    onClick={() => setPipelineFilter('active')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      pipelineFilter === 'active' ? 'bg-[#00205b] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <span>Active Bowlers ({activeAthletesCount})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setPipelineFilter('prospects')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      pipelineFilter === 'prospects' ? 'bg-[#c8102e] text-white shadow-xs' : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Inbound Prospects / Leads ({prospectsCount})</span>
+                  </button>
                 </div>
 
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex items-center gap-3">
+                  <div className="relative w-64">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search roster..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-3 text-xs text-slate-900 focus:outline-none"
+                    />
+                  </div>
+
                   <select
                     value={styleFilter}
                     onChange={(e) => setStyleFilter(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs text-slate-700 font-bold"
+                    className="bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs text-slate-700 font-bold"
                   >
                     <option value="all">All Styles</option>
                     <option value="1-Handed">1-Handed</option>
@@ -505,67 +541,121 @@ export const CoachDashboard: React.FC<CoachDashboardProps> = () => {
                 </div>
               </div>
 
+              {/* Roster Cards List */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden divide-y divide-slate-100">
-                {filteredAthletes.map((athlete) => (
-                  <div
-                    key={athlete.id}
-                    className="p-5 sm:p-6 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-[#00205b] text-white font-display font-black text-lg flex items-center justify-center shrink-0 shadow-xs">
-                        {athlete.fullName.split(' ').map((n) => n[0]).join('')}
-                      </div>
+                {filteredAthletes
+                  .filter((athlete) => {
+                    const isProspect = athlete.status === 'Prospect' || athlete.sessionsTotal === 0 || athlete.packageTier.includes('Diagnostic');
+                    if (pipelineFilter === 'active') return !isProspect;
+                    if (pipelineFilter === 'prospects') return isProspect;
+                    return true;
+                  })
+                  .map((athlete) => {
+                    const isProspect = athlete.status === 'Prospect' || athlete.sessionsTotal === 0 || athlete.packageTier.includes('Diagnostic');
 
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-mono font-bold text-[#c8102e]">
-                            {athlete.id}
-                          </span>
-                          <span className="px-2 py-0.5 rounded bg-blue-50 text-[#00205b] font-bold text-[10px] border border-blue-200">
-                            {athlete.style} ({athlete.dominantHand})
-                          </span>
-                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold text-[10px]">
-                            {athlete.bookAverage} Avg
-                          </span>
+                    return (
+                      <div
+                        key={athlete.id}
+                        className={`p-5 sm:p-6 transition-colors flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                          isProspect ? 'bg-amber-50/30 hover:bg-amber-50/60' : 'hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-xl text-white font-display font-black text-lg flex items-center justify-center shrink-0 shadow-xs ${
+                            isProspect ? 'bg-[#c39d5e]' : 'bg-[#00205b]'
+                          }`}>
+                            {athlete.fullName.split(' ').map((n) => n[0]).join('')}
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-mono font-bold text-[#c8102e]">
+                                {athlete.id}
+                              </span>
+
+                              {isProspect ? (
+                                <span className="px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px] border border-amber-300 flex items-center gap-1">
+                                  <Sparkles className="w-3 h-3 text-amber-600" />
+                                  <span>Inbound Prospect • Evaluation Submitted</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded bg-blue-50 text-[#00205b] font-bold text-[10px] border border-blue-200">
+                                  {athlete.packageTier}
+                                </span>
+                              )}
+
+                              <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold text-[10px]">
+                                {athlete.style} ({athlete.dominantHand}) • {athlete.bookAverage} Avg
+                              </span>
+                            </div>
+
+                            <h4 className="font-display text-base font-black text-[#00205b]">
+                              {athlete.fullName}
+                            </h4>
+
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium">
+                              <span>{athlete.email}</span>
+                              <span>•</span>
+                              <span>{athlete.phone}</span>
+                              <span>•</span>
+                              {isProspect ? (
+                                <span className="text-amber-800 font-bold">
+                                  Goal: {athlete.primaryGoal}
+                                </span>
+                              ) : (
+                                <span className="text-emerald-700 font-bold">
+                                  {athlete.sessionsCompleted}/{athlete.sessionsTotal} Sessions Completed
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
-                        <h4 className="font-display text-base font-black text-[#00205b]">
-                          {athlete.fullName}
-                        </h4>
+                        {/* Action Buttons */}
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
+                          {isProspect && (
+                            <>
+                              <a
+                                href={`tel:${athlete.phone}`}
+                                className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 text-[#00205b] border border-slate-300 text-xs font-bold flex items-center gap-1.5 shadow-2xs"
+                                title="Call or SMS Prospect"
+                              >
+                                <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Call / SMS</span>
+                              </a>
 
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium">
-                          <span>{athlete.email}</span>
-                          <span>•</span>
-                          <span>{athlete.phone}</span>
-                          <span>•</span>
-                          <span className="text-emerald-700 font-bold">
-                            {athlete.sessionsCompleted}/{athlete.sessionsTotal} Sessions Done
-                          </span>
+                              <a
+                                href={`mailto:${athlete.email}?subject=Your%20Diagnostic%20Evaluation%20-%20Coach%27s%20Eye%20Bowling%20Lab&body=Hi%20${encodeURIComponent(athlete.fullName)}%2C%0A%0AThank%20you%20for%20submitting%20your%20preliminary%20diagnostic%20evaluation%20at%20Coach%27s%20Eye%20Bowling%20Lab!%20I%20reviewed%20your%20current%20average%20(${athlete.bookAverage})%20and%20your%20focus%20on%20${encodeURIComponent(athlete.primaryGoal)}.%0A%0ALet%27s%20get%20you%20on-lane%20at%20Bowlero%20West%20Covina%20to%20film%20your%20first%20240fps%20slow-motion%20baseline!%20What%20weekday%20or%20weekend%20time%20works%20best%20for%20you%3F%0A%0ABest%2C%0ACoach%20Alfredo%20Quilarquez%0A(909)%20766-2710%0Acebowlinglab.com`}
+                                className="px-3.5 py-2 rounded-xl bg-[#c8102e] hover:bg-[#a60d24] text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-xs"
+                                title="Send Outreach Email"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                                <span>Outreach Email</span>
+                              </a>
+                            </>
+                          )}
+
+                          <button
+                            onClick={() => setSelectedAthlete(athlete)}
+                            className="bg-[#00205b] hover:bg-[#001740] text-white text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                          >
+                            <Video className="w-3.5 h-3.5" />
+                            <span>{isProspect ? 'View Evaluation' : 'Manage & Telemetry'}</span>
+                          </button>
+
+                          <a
+                            href={athlete.googleDriveFolderUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition-colors"
+                            title="Open Student Google Drive Folder"
+                          >
+                            <Folder className="w-4 h-4 text-amber-500" />
+                          </a>
                         </div>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
-                      <button
-                        onClick={() => setSelectedAthlete(athlete)}
-                        className="w-full sm:w-auto bg-[#00205b] hover:bg-[#001740] text-white text-xs font-bold uppercase tracking-wider px-4 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                      >
-                        <Video className="w-3.5 h-3.5" />
-                        <span>Manage & 240fps Telemetry</span>
-                      </button>
-
-                      <a
-                        href={athlete.googleDriveFolderUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition-colors"
-                        title="Open Student Google Drive Folder"
-                      >
-                        <Folder className="w-4 h-4 text-amber-500" />
-                      </a>
-                    </div>
-                  </div>
-                ))}
+                    );
+                  })}
               </div>
 
             </div>
