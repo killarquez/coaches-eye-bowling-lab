@@ -1,9 +1,12 @@
 package com.example.cebowlinglabtrack.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
+import com.example.cebowlinglabtrack.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -204,36 +207,53 @@ fun LiveTrackingScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(RoundedCornerShape(5.dp))
-                                    .background(
-                                        when (state.trackingState) {
-                                            TrackingState.IDLE -> NeonStrikeGreen
-                                            TrackingState.APPROACH_DETECTED, TrackingState.BALL_RELEASED -> ElectricAmber
-                                            TrackingState.BALL_IN_FLIGHT -> NeonCyan
-                                            TrackingState.PIN_DECK_ENTRY -> PowerCoral
-                                            TrackingState.SHOT_COMPLETED -> NeonStrikeGreen
-                                        }
-                                    )
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "CE BOWLING LAB",
-                                color = TextPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                            Text(
-                                text = " • TRACK",
-                                color = NeonCyan,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Official Coach's Eye Bowling Lab Emblem Badge
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF0B1E3B))
+                                .border(1.5.dp, Color(0xFFC39D5E), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.logo_emblem),
+                                contentDescription = "Coach's Eye Bowling Lab Emblem",
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(
+                                            when (state.trackingState) {
+                                                TrackingState.IDLE -> NeonStrikeGreen
+                                                TrackingState.APPROACH_DETECTED, TrackingState.BALL_RELEASED -> ElectricAmber
+                                                TrackingState.BALL_IN_FLIGHT -> NeonCyan
+                                                TrackingState.PIN_DECK_ENTRY -> PowerCoral
+                                                TrackingState.SHOT_COMPLETED -> NeonStrikeGreen
+                                            }
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "CE BOWLING LAB",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Text(
+                                    text = " • TRACK",
+                                    color = NeonCyan,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
 
                         // Status & 1st/2nd Ball Indicator Dots (Matching LaneTrax)
                         Row(
@@ -266,6 +286,7 @@ fun LiveTrackingScreen(
                             )
                         }
                     }
+                }
 
                     // Actions: Replay toggle, 120 FPS status badge, Calibration
                     Row(
