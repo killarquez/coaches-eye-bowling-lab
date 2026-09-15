@@ -46,25 +46,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cebowlinglabtrack.domain.model.ShotData
+import com.example.cebowlinglabtrack.domain.model.TargetComparisonResult
+import com.example.cebowlinglabtrack.domain.model.VisualTargetLine
 import com.example.cebowlinglabtrack.theme.DarkBackground
 import com.example.cebowlinglabtrack.theme.DarkCardBorder
+import com.example.cebowlinglabtrack.theme.DarkCardBorderGold
+import com.example.cebowlinglabtrack.theme.DarkSurfaceVariant
 import com.example.cebowlinglabtrack.theme.ElectricAmber
 import com.example.cebowlinglabtrack.theme.NeonCyan
 import com.example.cebowlinglabtrack.theme.NeonStrikeGreen
 import com.example.cebowlinglabtrack.theme.PowerCoral
+import com.example.cebowlinglabtrack.theme.TextPrimary
+import com.example.cebowlinglabtrack.theme.TextSecondary
+import com.example.cebowlinglabtrack.theme.UsbcGold
+import com.example.cebowlinglabtrack.theme.UsbcNavy
+import com.example.cebowlinglabtrack.theme.UsbcRed
+import kotlin.math.abs
 
 /**
  * 1:1 LaneTrax-style Split-Screen Shot Review & Replay Interface.
  *
- * Left side: Continuous 2D Top-Down Lane with neon green ball trajectory.
+ * Left side: Continuous 2D Top-Down Lane with neon green ball trajectory and Target Line.
  * Right side:
  *   - Video Replay Player (looping shot playback with fullscreen toggle)
+ *   - Target vs Actual Comparison Card (Strike.app style)
  *   - Action Buttons ("Correct", "Save", "Delete")
  *   - Scrollable 2-Column Grid of Metric Cards (Foul Line, Arrows, Entry Board, Rev Rate, Breakpoint, Angles, Speeds)
  */
 @Composable
 fun LaneTraxReviewView(
     shot: ShotData,
+    targetLine: VisualTargetLine? = null,
+    targetComparison: TargetComparisonResult? = null,
     onSaveShot: () -> Unit,
     onDeleteShot: () -> Unit,
     onCorrectCalibration: () -> Unit,
@@ -78,11 +91,12 @@ fun LaneTraxReviewView(
     val sd = shot.spectoTelemetry.speed
     val dy = shot.spectoTelemetry.dynamics
 
-    val cardTealBackground = Color(0xFF134E4A) // Dark teal card matching LaneTrax
-    val cardTealBorder = Color(0xFF14B8A6).copy(alpha = 0.35f)
-    val buttonBlue = Color(0xFF0284C7)
-    val buttonPurple = Color(0xFF7C3AED)
-    val buttonRed = Color(0xFFB91C1C)
+    // Official CE Bowling Lab theme colors
+    val cardBackground = DarkSurfaceVariant // Brand navy surface
+    val cardBorder = DarkCardBorderGold     // Brand gold border
+    val buttonBlue = UsbcNavy
+    val buttonGold = UsbcGold
+    val buttonRed = UsbcRed
 
     Box(
         modifier = modifier
@@ -134,6 +148,7 @@ fun LaneTraxReviewView(
                     TopDownLaneCanvas(
                         trajectory = shot.trajectoryPoints,
                         spectoTelemetry = shot.spectoTelemetry,
+                        targetLine = targetLine,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -169,7 +184,7 @@ fun LaneTraxReviewView(
                                 .padding(8.dp)
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF6D28D9).copy(alpha = 0.85f))
+                                .background(buttonBlue.copy(alpha = 0.85f))
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Fullscreen,
@@ -177,6 +192,67 @@ fun LaneTraxReviewView(
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
+                        }
+                    }
+
+                    // 1.5 TARGET ACCURACY COMPARISON CARD (Strike.app style)
+                    targetComparison?.let { comp ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(cardBackground)
+                                .border(1.5.dp, cardBorder, RoundedCornerShape(14.dp))
+                                .padding(12.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("🎯 TARGET: ", color = buttonGold, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                                        Text(targetLine?.name ?: "CUSTOM", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (comp.overallAccuracyScore >= 80) buttonGold.copy(alpha = 0.2f) else buttonRed.copy(alpha = 0.2f))
+                                            .border(1.dp, if (comp.overallAccuracyScore >= 80) buttonGold else buttonRed, RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            "${comp.overallAccuracyScore}% • ${comp.accuracyRating}",
+                                            color = if (comp.overallAccuracyScore >= 80) buttonGold else buttonRed,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("LAYDOWN", color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text("${if (comp.laydownDelta >= 0) "+" else ""}${"%.1f".format(comp.laydownDelta)}B", color = if (abs(comp.laydownDelta) <= 1.0f) NeonStrikeGreen else ElectricAmber, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("ARROWS", color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text("${if (comp.arrowDelta >= 0) "+" else ""}${"%.1f".format(comp.arrowDelta)}B", color = if (abs(comp.arrowDelta) <= 1.0f) NeonStrikeGreen else ElectricAmber, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("BREAKPOINT", color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text("${if (comp.breakpointDelta >= 0) "+" else ""}${"%.1f".format(comp.breakpointDelta)}B", color = if (abs(comp.breakpointDelta) <= 1.0f) NeonStrikeGreen else ElectricAmber, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("POCKET", color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(if (abs(comp.pocketDelta) <= 0.8f) "HIT!" else "${if (comp.pocketDelta >= 0) "+" else ""}${"%.1f".format(comp.pocketDelta)}B", color = if (abs(comp.pocketDelta) <= 0.8f) NeonStrikeGreen else PowerCoral, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -190,28 +266,28 @@ fun LaneTraxReviewView(
                             onClick = onCorrectCalibration,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(56.dp),
+                                .height(52.dp),
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = buttonBlue)
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.Edit, contentDescription = "Correct", tint = Color.White, modifier = Modifier.size(20.dp))
-                                Text("Correct", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Edit, contentDescription = "Correct", tint = Color.White, modifier = Modifier.size(18.dp))
+                                Text("Correct", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        // Save Button (Purple)
+                        // Save Button (Gold)
                         Button(
                             onClick = onSaveShot,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(56.dp),
+                                .height(52.dp),
                             shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = buttonPurple)
+                            colors = ButtonDefaults.buttonColors(containerColor = buttonGold)
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.SaveAlt, contentDescription = "Save", tint = Color.White, modifier = Modifier.size(20.dp))
-                                Text("Save", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.SaveAlt, contentDescription = "Save", tint = Color.Black, modifier = Modifier.size(18.dp))
+                                Text("Save", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -221,64 +297,64 @@ fun LaneTraxReviewView(
                         onClick = onDeleteShot,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp),
-                        shape = RoundedCornerShape(14.dp),
+                            .height(40.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = buttonRed)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Delete", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text("Delete", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    // 3. METRIC CARDS 2x2 GRID (LaneTrax Style)
+                    // 3. METRIC CARDS 2x2 GRID (LaneTrax Style in Brand Navy)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LaneTraxMetricCard("Foul Line", "${sp.laydownBoard}", "", cardTealBackground, cardTealBorder, Modifier.weight(1f))
-                        LaneTraxMetricCard("Arrows", "${sp.arrowBoard}", "", cardTealBackground, cardTealBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Foul Line", "${sp.laydownBoard}", "", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Arrows", "${sp.arrowBoard}", "", cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LaneTraxMetricCard("Entry Board", "${sp.entryBoard}", "", cardTealBackground, cardTealBorder, Modifier.weight(1f))
-                        LaneTraxMetricCard("Rev Rate", "${dy.rpm}", "rpm", cardTealBackground, cardTealBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Entry Board", "${sp.entryBoard}", "", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Rev Rate", "${dy.rpm}", "rpm", cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LaneTraxMetricCard("Breakpoint\nBoard", "${sp.breakpointBoard}", "", cardTealBackground, cardTealBorder, Modifier.weight(1f))
-                        LaneTraxMetricCard("Breakpoint\nDistance", "${sp.breakpointDistanceFt}", "ft", cardTealBackground, cardTealBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Breakpoint\nBoard", "${sp.breakpointBoard}", "", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Breakpoint\nDistance", "${sp.breakpointDistanceFt}", "ft", cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LaneTraxMetricCard("Launch\nAngle", "${an.launchAngleDeg}°", "", cardTealBackground, cardTealBorder, Modifier.weight(1f))
-                        LaneTraxMetricCard("Impact\nAngle", "${an.impactAngleDeg}°", "", cardTealBackground, cardTealBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Launch\nAngle", "${an.launchAngleDeg}°", "", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Impact\nAngle", "${an.impactAngleDeg}°", "", cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LaneTraxMetricCard("Launch\nSpeed", "${sd.launchSpeedMph}", "mph", cardTealBackground, cardTealBorder, Modifier.weight(1f))
-                        LaneTraxMetricCard("Impact\nSpeed", "${sd.entrySpeedMph}", "mph", cardTealBackground, cardTealBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Launch\nSpeed", "${sd.launchSpeedMph}", "mph", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Impact\nSpeed", "${sd.entrySpeedMph}", "mph", cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        LaneTraxMetricCard("Power\nScore", String.format("%.2f", dy.powerScore), "", cardTealBackground, cardTealBorder, Modifier.weight(1f))
-                        LaneTraxMetricCard("Deflection", "${sp.pinDeckDeflection}", "b", cardTealBackground, cardTealBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Power\nScore", String.format("%.2f", dy.powerScore), "", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Deflection", "${sp.pinDeckDeflection}", "b", cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
                     // Next Shot Trigger button

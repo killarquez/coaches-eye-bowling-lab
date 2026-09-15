@@ -6,16 +6,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val CoachingDarkColorScheme = darkColorScheme(
-    primary = NeonStrikeGreen,
+    primary = UsbcGold,
     onPrimary = Color.Black,
-    primaryContainer = Color(0xFF00381B),
-    onPrimaryContainer = NeonStrikeGreen,
+    primaryContainer = UsbcNavyDark,
+    onPrimaryContainer = UsbcGoldLight,
     secondary = NeonCyan,
     onSecondary = Color.Black,
-    secondaryContainer = Color(0xFF00363D),
+    secondaryContainer = Color(0xFF07274E),
     onSecondaryContainer = NeonCyan,
-    tertiary = ElectricAmber,
-    onTertiary = Color.Black,
+    tertiary = UsbcRed,
+    onTertiary = Color.White,
     background = DarkBackground,
     onBackground = TextPrimary,
     surface = DarkSurface,
@@ -23,7 +23,7 @@ private val CoachingDarkColorScheme = darkColorScheme(
     surfaceVariant = DarkSurfaceVariant,
     onSurfaceVariant = TextSecondary,
     outline = DarkCardBorder,
-    error = PowerCoral
+    error = UsbcRed
 )
 
 @Composable

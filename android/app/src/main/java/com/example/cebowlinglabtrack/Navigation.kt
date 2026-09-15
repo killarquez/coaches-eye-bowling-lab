@@ -40,6 +40,9 @@ import com.example.cebowlinglabtrack.ui.screens.LiveTrackingScreen
 import com.example.cebowlinglabtrack.ui.screens.SessionHistoryScreen
 import com.example.cebowlinglabtrack.ui.screens.TopDownLaneScreen
 
+import com.example.cebowlinglabtrack.theme.UsbcGold
+import com.example.cebowlinglabtrack.theme.UsbcNavyLight
+
 enum class BowlingScreenTab(val title: String, val icon: ImageVector) {
     TRACK("Live Track", Icons.Default.Videocam),
     LANE_2D("2D Lane", Icons.Default.LineAxis),
@@ -72,18 +75,18 @@ fun MainNavigation(
                             Icon(
                                 imageVector = tab.icon,
                                 contentDescription = tab.title,
-                                tint = if (selected) NeonStrikeGreen else TextMuted
+                                tint = if (selected) UsbcGold else TextMuted
                             )
                         },
                         label = {
                             Text(
                                 text = tab.title,
-                                color = if (selected) NeonStrikeGreen else TextMuted,
+                                color = if (selected) UsbcGold else TextMuted,
                                 fontSize = 10.sp
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = Color(0xFF00381B)
+                            indicatorColor = UsbcNavyLight.copy(alpha = 0.5f)
                         )
                     )
                 }
@@ -106,12 +109,23 @@ fun MainNavigation(
                         },
                         onArmNextShot = { viewModel.armForNextShot() },
                         onNavigateCalibration = { currentTab = BowlingScreenTab.CALIBRATE },
+                        onSelectTargetLine = { line -> viewModel.selectTargetLine(line) },
+                        onAutoCalibrate = {
+                            val success = viewModel.autoCalibrateLatestFrame()
+                            if (!success) {
+                                currentTab = BowlingScreenTab.CALIBRATE
+                            }
+                        },
+                        onCalibrateDefault = { viewModel.calibrateWithDefaults() },
                         onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
                         onSimulateShot = { preset -> viewModel.simulateShot(preset) }
                     )
                 }
                 BowlingScreenTab.LANE_2D -> {
-                    TopDownLaneScreen(shot = uiState.activeShot)
+                    TopDownLaneScreen(
+                        shot = uiState.activeShot,
+                        targetLine = uiState.activeTargetLine
+                    )
                 }
                 BowlingScreenTab.KINEMATICS -> {
                     KinematicsDetailScreen(kinematics = uiState.liveKinematics ?: uiState.activeShot?.kinematics)

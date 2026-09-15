@@ -21,7 +21,9 @@ import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.Point2D
 import com.example.cebowlinglabtrack.domain.model.ShotData
+import com.example.cebowlinglabtrack.domain.model.TargetComparisonResult
 import com.example.cebowlinglabtrack.domain.model.TrajectoryPoint
+import com.example.cebowlinglabtrack.domain.model.VisualTargetLine
 import com.example.cebowlinglabtrack.domain.tracking.TelemetryExtractor
 import com.example.cebowlinglabtrack.domain.tracking.TrackingState
 import com.example.cebowlinglabtrack.domain.tracking.TrajectoryTracker
@@ -43,7 +45,12 @@ data class TrackingUiState(
     val liveKinematics: BowlerKinematics? = null,
     val trackingState: TrackingState = TrackingState.IDLE,
     val calibration: LaneCalibration? = null,
+    val isLaneCalibrated: Boolean = false, // Safety interlock: inhibits shot recording until calibrated
+    val calibrationQuality: String = "UNCALIBRATED",
     val projectedGuides: ProjectedLaneGuides? = null,
+    val activeTargetLine: VisualTargetLine = VisualTargetLine.DEFAULT,
+    val targetComparison: TargetComparisonResult? = null,
+    val showTargetLineSelector: Boolean = false,
     val inferenceLatencyMs: Double = 2.4, // Real optical differencing latency <3ms
     val fps: Int = 120, // 120 FPS high-speed target
     val isTrackingActive: Boolean = false,
@@ -90,32 +97,40 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             repository.loadInitialData()
             val existingCalib = repository.activeCalibration.value
-            if (existingCalib != null && existingCalib.homographyMatrixElements.size == 9) {
+            if (existingCalib != null && existingCalib.homographyMatrixElements.size == 9 && existingCalib.reprojectionErrorRmse < 15.0) {
                 homography = HomographyMatrix(existingCalib.homographyMatrixElements.toDoubleArray())
                 opticalBallDetector.updateHomography(homography)
                 trajectoryTracker.updateHomography(homography)
                 pinDeckDetector.updateHomography(homography)
-                val guides = calibrator.generateProjectedGuides(homography)
+                val guides = calibrator.generateProjectedGuides(homography, _uiState.value.activeTargetLine)
                 _uiState.value = _uiState.value.copy(
                     calibration = existingCalib,
+                    isLaneCalibrated = true,
+                    calibrationQuality = "CALIBRATED",
                     projectedGuides = guides
                 )
             } else {
-                // Default calibration for standard mobile viewport
+                // Initial launch: uncalibrated physical lane (safety interlock active)
                 val (defaultCalib, defaultH) = calibrator.createDefaultCalibration(1080f, 1920f)
                 homography = defaultH
                 opticalBallDetector.updateHomography(homography)
                 trajectoryTracker.updateHomography(homography)
                 pinDeckDetector.updateHomography(homography)
-                val guides = calibrator.generateProjectedGuides(homography)
+                val guides = calibrator.generateProjectedGuides(homography, _uiState.value.activeTargetLine)
                 _uiState.value = _uiState.value.copy(
                     calibration = defaultCalib,
+                    isLaneCalibrated = false,
+                    calibrationQuality = "CALIBRATION REQUIRED",
                     projectedGuides = guides
                 )
-                repository.saveCalibration(defaultCalib)
             }
         }
     }
+
+    private var latestFrame: ByteArray? = null
+    private var latestWidth: Int = 0
+    private var latestHeight: Int = 0
+    private var latestStride: Int = 0
 
     override fun onCleared() {
         super.onCleared()
@@ -124,6 +139,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * Processes live CameraX Y-plane frames at 120 FPS.
+     * Safety Interlock: Inhibits tracking and recording if the physical lane is not yet calibrated.
      */
     fun processLiveFrame(
         imageBytes: ByteArray,
@@ -132,6 +148,16 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         stride: Int,
         timestampMs: Long
     ) {
+        latestFrame = imageBytes
+        latestWidth = width
+        latestHeight = height
+        latestStride = stride
+
+        // Safety interlock: inhibit tracking if lane is not calibrated
+        if (!_uiState.value.isLaneCalibrated) {
+            return
+        }
+
         if (_uiState.value.trackingState == TrackingState.SHOT_COMPLETED) {
             return
         }
@@ -155,6 +181,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
             val trajectory = trajectoryTracker.trajectory
             val spectoTelemetry = TelemetryExtractor.extractSpectoTelemetry(trajectory)
+            val targetComp = _uiState.value.activeTargetLine.compareShot(trajectory)
             val shotCount = repository.shots.value.size + 1
 
             val completedShot = ShotData(
@@ -185,7 +212,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                     inferenceLatencyMs = latency,
                     pinfallResult = pinResult,
                     standingPins = pinResult.standingPins,
-                    ballNumber = pinResult.ballNumber
+                    ballNumber = pinResult.ballNumber,
+                    targetComparison = targetComp
                 )
             }
         } else {
@@ -215,10 +243,12 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             opticalBallDetector.updateHomography(newH)
             trajectoryTracker.updateHomography(newH)
             pinDeckDetector.updateHomography(newH)
-            val guides = calibrator.generateProjectedGuides(newH)
+            val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
 
             _uiState.value = _uiState.value.copy(
                 calibration = calib,
+                isLaneCalibrated = true,
+                calibrationQuality = "CALIBRATED (AUTO)",
                 projectedGuides = guides,
                 zoomRatio = result.optimalZoomRatio
             )
@@ -229,6 +259,41 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             return true
         }
         return false
+    }
+
+    /**
+     * Attempts 1-tap auto-calibration from the most recently captured live camera frame.
+     * If no live camera frame is present, returns false.
+     */
+    fun autoCalibrateLatestFrame(): Boolean {
+        val bytes = latestFrame ?: return false
+        val w = latestWidth
+        val h = latestHeight
+        val s = if (latestStride > 0) latestStride else w
+        if (w <= 0 || h <= 0) return false
+        return autoCalibrateFromFrame(bytes, w, h, s)
+    }
+
+    /**
+     * Arms the tracker using standard USBC physical lane dimensions preset.
+     */
+    fun calibrateWithDefaults() {
+        val defaultCalib = LaneCalibrator.DEFAULT_CALIBRATION
+        val newH = HomographyMatrix(defaultCalib.homographyMatrixElements.toDoubleArray())
+        homography = newH
+        opticalBallDetector.updateHomography(newH)
+        trajectoryTracker.updateHomography(newH)
+        pinDeckDetector.updateHomography(newH)
+        val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
+        _uiState.value = _uiState.value.copy(
+            calibration = defaultCalib,
+            isLaneCalibrated = true,
+            calibrationQuality = "CALIBRATED (STANDARD)",
+            projectedGuides = guides
+        )
+        viewModelScope.launch {
+            repository.saveCalibration(defaultCalib)
+        }
     }
 
     /**
@@ -248,8 +313,30 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             activeShot = null,
             liveTrajectory = emptyList(),
             liveMetrics = null,
+            targetComparison = null,
             trackingState = TrackingState.IDLE,
             isSimulating = false
+        )
+    }
+
+    /**
+     * Selects an active target line (Strike.app style).
+     */
+    fun selectTargetLine(targetLine: VisualTargetLine) {
+        val guides = calibrator.generateProjectedGuides(homography, targetLine)
+        _uiState.value = _uiState.value.copy(
+            activeTargetLine = targetLine,
+            projectedGuides = guides,
+            showTargetLineSelector = false
+        )
+    }
+
+    /**
+     * Toggles the target line selection drawer.
+     */
+    fun toggleTargetLineSelector(show: Boolean? = null) {
+        _uiState.value = _uiState.value.copy(
+            showTargetLineSelector = show ?: !_uiState.value.showTargetLineSelector
         )
     }
 
@@ -268,10 +355,12 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         opticalBallDetector.updateHomography(newH)
         trajectoryTracker.updateHomography(newH)
         pinDeckDetector.updateHomography(newH)
-        val guides = calibrator.generateProjectedGuides(newH)
+        val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
 
         _uiState.value = _uiState.value.copy(
             calibration = calib,
+            isLaneCalibrated = true,
+            calibrationQuality = "CALIBRATED (MANUAL 4-PT)",
             projectedGuides = guides
         )
 
@@ -349,11 +438,14 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 delay(16)
             }
 
+            val targetComp = _uiState.value.activeTargetLine.compareShot(fullShot.trajectoryPoints)
+
             _uiState.value = _uiState.value.copy(
                 activeShot = fullShot,
                 liveMetrics = fullShot.ballMetrics,
                 trackingState = TrackingState.SHOT_COMPLETED,
-                isSimulating = false
+                isSimulating = false,
+                targetComparison = targetComp
             )
 
             repository.saveShot(fullShot)

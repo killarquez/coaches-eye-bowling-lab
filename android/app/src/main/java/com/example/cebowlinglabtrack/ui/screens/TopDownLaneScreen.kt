@@ -52,6 +52,7 @@ import com.example.cebowlinglabtrack.ui.components.TopDownLaneCanvas
 @Composable
 fun TopDownLaneScreen(
     shot: ShotData?,
+    targetLine: com.example.cebowlinglabtrack.domain.model.VisualTargetLine? = null,
     modifier: Modifier = Modifier
 ) {
     var scrubDistanceFt by remember { mutableFloatStateOf(62.8f) }
@@ -143,6 +144,7 @@ fun TopDownLaneScreen(
                 trajectory = visibleTrajectory,
                 metrics = metrics,
                 spectoTelemetry = specto,
+                targetLine = targetLine,
                 modifier = Modifier.fillMaxSize()
             )
         }

@@ -25,7 +25,7 @@ data class Camera3AConfig(
     val isoSensitivity: Int = 800,
     val hyperfocalDiopters: Float = 0.12f, // 1 / 8.3 meters ~ 27 feet down-lane
     val lockAe: Boolean = true,
-    val lockAwb: Boolean = true,
+    val lockAwb: Boolean = false, // Set false to ensure standard ISP color balance and eliminate Bayer green tint
     val lockAf: Boolean = true
 )
 
@@ -86,11 +86,20 @@ object CameraPipelineHelper {
             )
         }
 
-        // 3. Lock Auto White Balance
+        // 3. Auto White Balance (Eliminate Bayer green tint by using Camera2 ISP AWB)
         if (config.lockAwb) {
             interop.setCaptureRequestOption(
                 CaptureRequest.CONTROL_AWB_MODE,
-                CaptureRequest.CONTROL_AWB_MODE_OFF
+                CaptureRequest.CONTROL_AWB_MODE_AUTO
+            )
+            interop.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AWB_LOCK,
+                true
+            )
+        } else {
+            interop.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AWB_MODE,
+                CaptureRequest.CONTROL_AWB_MODE_AUTO
             )
         }
 

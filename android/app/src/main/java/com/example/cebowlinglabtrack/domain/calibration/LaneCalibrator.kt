@@ -7,6 +7,16 @@ import com.example.cebowlinglabtrack.domain.model.Point2D
 import java.util.UUID
 
 /**
+ * Gutter forward AR chevron geometry projected onto screen pixels.
+ */
+data class GutterChevron(
+    val tip: Point2D,
+    val leftWing: Point2D,
+    val rightWing: Point2D,
+    val distanceFt: Double
+)
+
+/**
  * Lane guide line geometry projected onto screen pixel coordinates.
  */
 data class ProjectedLaneGuides(
@@ -17,7 +27,10 @@ data class ProjectedLaneGuides(
     val arrowsLine: Pair<Point2D, Point2D>,
     val arrowPoints: List<Point2D>,
     val headpinPoint: Point2D,
-    val pinDeckLine: Pair<Point2D, Point2D>
+    val pinDeckLine: Pair<Point2D, Point2D>,
+    val leftGutterChevrons: List<GutterChevron> = emptyList(),
+    val rightGutterChevrons: List<GutterChevron> = emptyList(),
+    val targetLinePointsScreen: List<Point2D> = emptyList()
 )
 
 /**
@@ -73,9 +86,13 @@ class LaneCalibrator {
     }
 
     /**
-     * Generates standard lane AR guide lines projected into camera screen coordinates.
+     * Generates standard lane AR guide lines projected into camera screen coordinates,
+     * including forward gutter chevrons (Strike.app style) and visual target line.
      */
-    fun generateProjectedGuides(homography: HomographyMatrix): ProjectedLaneGuides {
+    fun generateProjectedGuides(
+        homography: HomographyMatrix,
+        targetLine: com.example.cebowlinglabtrack.domain.model.VisualTargetLine? = null
+    ): ProjectedLaneGuides {
         // Foul Line
         val foulLeft = homography.forward(LanePoint(1.0, 0.0))
         val foulRight = homography.forward(LanePoint(39.0, 0.0))
@@ -127,6 +144,30 @@ class LaneCalibrator {
             homography.forward(LanePoint(39.0, 60.0))
         )
 
+        // Forward AR Gutter Chevrons every 5 ft down the lane (Strike.app style)
+        val chevronDistances = listOf(5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0)
+        val leftChevrons = chevronDistances.map { d ->
+            GutterChevron(
+                tip = homography.forward(LanePoint(1.0, d + 1.2)),
+                leftWing = homography.forward(LanePoint(0.4, d)),
+                rightWing = homography.forward(LanePoint(1.6, d)),
+                distanceFt = d
+            )
+        }
+        val rightChevrons = chevronDistances.map { d ->
+            GutterChevron(
+                tip = homography.forward(LanePoint(39.0, d + 1.2)),
+                leftWing = homography.forward(LanePoint(38.4, d)),
+                rightWing = homography.forward(LanePoint(39.6, d)),
+                distanceFt = d
+            )
+        }
+
+        // Project visual target line into camera viewport
+        val targetPointsScreen = targetLine?.generateTrajectory(60)?.map { pt ->
+            homography.forward(pt)
+        } ?: emptyList()
+
         return ProjectedLaneGuides(
             foulLine = Pair(foulLeft, foulRight),
             leftGutterLine = leftGutter,
@@ -135,7 +176,10 @@ class LaneCalibrator {
             arrowsLine = arrowsLine,
             arrowPoints = arrowPoints,
             headpinPoint = headpin,
-            pinDeckLine = pinDeckLine
+            pinDeckLine = pinDeckLine,
+            leftGutterChevrons = leftChevrons,
+            rightGutterChevrons = rightChevrons,
+            targetLinePointsScreen = targetPointsScreen
         )
     }
 
@@ -164,5 +208,11 @@ class LaneCalibrator {
                     id
                 )
             }
+    }
+
+    companion object {
+        val DEFAULT_CALIBRATION: LaneCalibration by lazy {
+            LaneCalibrator().createDefaultCalibration(1080f, 1920f).first
+        }
     }
 }

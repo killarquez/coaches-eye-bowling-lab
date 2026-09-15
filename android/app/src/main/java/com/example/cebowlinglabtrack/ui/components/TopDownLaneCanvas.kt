@@ -37,9 +37,11 @@ import com.example.cebowlinglabtrack.theme.NeonStrikeGreen
 import com.example.cebowlinglabtrack.theme.OilPatternTint
 import com.example.cebowlinglabtrack.theme.PowerCoral
 import com.example.cebowlinglabtrack.theme.SoftPurple
+import com.example.cebowlinglabtrack.theme.TargetLineGold
 import com.example.cebowlinglabtrack.theme.TextMuted
 import com.example.cebowlinglabtrack.theme.TextPrimary
 import com.example.cebowlinglabtrack.theme.TextSecondary
+import com.example.cebowlinglabtrack.domain.model.VisualTargetLine
 import kotlin.math.abs
 
 /**
@@ -50,6 +52,7 @@ import kotlin.math.abs
  * - Color-coded Skid (Cyan), Hook (Amber), and Roll (Green) motion phases
  * - 40 ft Pattern Exit line & board indicator
  * - Foul line, 15ft arrows, 40ft range finders, 60ft 10-pin triangle deck
+ * - Visual Target Line in glowing gold (Strike.app style)
  * - Pin deck deflection trajectory through the pins into the pit
  */
 @Composable
@@ -57,6 +60,7 @@ fun TopDownLaneCanvas(
     trajectory: List<TrajectoryPoint>,
     metrics: BallMetrics? = null,
     spectoTelemetry: SpectoTelemetry? = null,
+    targetLine: VisualTargetLine? = null,
     modifier: Modifier = Modifier,
     highlightBreakpoint: Boolean = true,
     oilPatternLengthFt: Double = 40.0
@@ -182,6 +186,40 @@ fun TopDownLaneCanvas(
 
             // 8. Draw 10-Pin Triangle Deck at 60 ft
             drawPinDeck(::boardToScreenX, ::ftToScreenY)
+
+            // 8.5 Draw Visual Target Line (Strike.app style in glowing gold)
+            targetLine?.let { tl ->
+                val targetTrajectory = tl.generateTrajectory(60)
+                for (i in 0 until targetTrajectory.size - 1) {
+                    val p1 = targetTrajectory[i]
+                    val p2 = targetTrajectory[i + 1]
+                    drawLine(
+                        color = TargetLineGold.copy(alpha = 0.85f),
+                        start = Offset(boardToScreenX(p1.board), ftToScreenY(p1.distanceFt)),
+                        end = Offset(boardToScreenX(p2.board), ftToScreenY(p2.distanceFt)),
+                        strokeWidth = 3.5f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+                    )
+                }
+
+                // Draw target rings at keypoints
+                val keypoints = listOf(
+                    Triple(tl.laydownBoard.toDouble(), 0.0, "TL"),
+                    Triple(tl.arrowBoard.toDouble(), 15.0, "TARGET ARROWS"),
+                    Triple(tl.breakpointBoard.toDouble(), tl.breakpointDistanceFt.toDouble(), "TARGET BP"),
+                    Triple(tl.pocketBoard.toDouble(), 60.0, "TARGET POCKET")
+                )
+                for (kp in keypoints) {
+                    val kx = boardToScreenX(kp.first)
+                    val ky = ftToScreenY(kp.second)
+                    drawCircle(
+                        color = TargetLineGold,
+                        radius = 6f,
+                        center = Offset(kx, ky),
+                        style = Stroke(width = 2.5f)
+                    )
+                }
+            }
 
             // 9. Draw Ball Trajectory Path with Motion Phase Color Coding
             if (trajectory.size >= 2) {
