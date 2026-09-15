@@ -101,8 +101,12 @@ fun MainNavigation(
                 BowlingScreenTab.TRACK -> {
                     LiveTrackingScreen(
                         state = uiState,
-                        onSimulateShot = { preset -> viewModel.simulateShot(preset) },
-                        onNavigateCalibration = { currentTab = BowlingScreenTab.CALIBRATE }
+                        onFrameAvailable = { bytes, w, h, s, timeMs ->
+                            viewModel.processLiveFrame(bytes, w, h, s, timeMs)
+                        },
+                        onArmNextShot = { viewModel.armForNextShot() },
+                        onNavigateCalibration = { currentTab = BowlingScreenTab.CALIBRATE },
+                        onSimulateShot = { preset -> viewModel.simulateShot(preset) }
                     )
                 }
                 BowlingScreenTab.LANE_2D -> {
@@ -114,6 +118,9 @@ fun MainNavigation(
                 BowlingScreenTab.CALIBRATE -> {
                     CalibrationScreen(
                         currentCalibration = uiState.calibration,
+                        onAutoDetectLane = { bytes, w, h, s ->
+                            viewModel.autoCalibrateFromFrame(bytes, w, h, s)
+                        },
                         onSaveCalibration = { flL, flR, arL, arR ->
                             viewModel.updateCalibration(flL, flR, arL, arR)
                             currentTab = BowlingScreenTab.TRACK

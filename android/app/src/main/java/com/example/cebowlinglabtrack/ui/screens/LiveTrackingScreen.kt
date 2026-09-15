@@ -17,11 +17,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -38,17 +37,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.cebowlinglabtrack.camera.CameraPreviewView
 import com.example.cebowlinglabtrack.domain.calibration.ProjectedLaneGuides
 import com.example.cebowlinglabtrack.domain.ml.ShotStylePreset
 import com.example.cebowlinglabtrack.domain.tracking.TrackingState
 import com.example.cebowlinglabtrack.theme.DarkBackground
 import com.example.cebowlinglabtrack.theme.DarkCardBorder
 import com.example.cebowlinglabtrack.theme.DarkSurface
-import com.example.cebowlinglabtrack.theme.DarkSurfaceVariant
 import com.example.cebowlinglabtrack.theme.ElectricAmber
 import com.example.cebowlinglabtrack.theme.NeonCyan
 import com.example.cebowlinglabtrack.theme.NeonStrikeGreen
@@ -62,18 +60,22 @@ import com.example.cebowlinglabtrack.ui.components.SkeletonOverlay
 import com.example.cebowlinglabtrack.ui.components.TelemetryHUDCard
 
 /**
- * Main Live Camera Tracking Screen with LaneTrax Split-Screen Shot Review & Replay Mode.
+ * Main Live Camera Tracking Screen with real-time optical ball tracking,
+ * AR projected lane guides, and LaneTrax Split-Screen Shot Review & Replay Mode.
  */
 @Composable
 fun LiveTrackingScreen(
     state: TrackingUiState,
-    onSimulateShot: (ShotStylePreset) -> Unit,
-    onNavigateCalibration: () -> Unit,
+    onFrameAvailable: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, timestampMs: Long) -> Unit)? = null,
+    onArmNextShot: () -> Unit = {},
+    onNavigateCalibration: () -> Unit = {},
+    onSimulateShot: ((ShotStylePreset) -> Unit)? = null,
     onSaveShot: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var selectedPreset by remember { mutableStateOf(ShotStylePreset.POWER_CRANKER) }
     var showReviewMode by remember { mutableStateOf(false) }
+    var showDebugSimulate by remember { mutableStateOf(false) }
+    var selectedPreset by remember { mutableStateOf(ShotStylePreset.POWER_CRANKER) }
 
     // When a shot completes, automatically activate LaneTrax review mode
     val activeShot = state.activeShot
@@ -86,66 +88,72 @@ fun LiveTrackingScreen(
             onSaveShot = {
                 onSaveShot?.invoke()
                 showReviewMode = false
+                onArmNextShot()
             },
             onDeleteShot = {
                 showReviewMode = false
+                onArmNextShot()
             },
             onCorrectCalibration = onNavigateCalibration,
             onNewShot = {
                 showReviewMode = false
+                onArmNextShot()
             },
             modifier = modifier
         )
     } else {
-        // Live Camera Viewfinder & AR Projected Lane Guides
+        // Live Camera Viewfinder & AR Overlays
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(DarkBackground)
+                .background(Color.Black)
         ) {
-            // Viewfinder background (concourse/lane view)
-            Box(modifier = Modifier.fillMaxSize()) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    drawRect(Color(0xFF0F141F))
+            // 1. Live CameraX Preview Stream
+            CameraPreviewView(
+                onFrameAvailable = onFrameAvailable,
+                modifier = Modifier.fillMaxSize()
+            )
 
-                    // Render AR projected lane guides
-                    state.projectedGuides?.let { guides ->
-                        drawProjectedGuides(guides)
-                    }
-
-                    // Render in-flight ball circle if tracking
-                    if (state.liveTrajectory.isNotEmpty()) {
-                        val lastPt = state.liveTrajectory.last()
-                        val hElements = state.calibration?.homographyMatrixElements
-                        if (hElements != null && hElements.size == 9) {
-                            val m = com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix(
-                                hElements.toDoubleArray()
-                            )
-                            val screenPt = m.forward(
-                                com.example.cebowlinglabtrack.domain.model.LanePoint(lastPt.xBoard, lastPt.yFt)
-                            )
-                            drawCircle(
-                                color = NeonStrikeGreen.copy(alpha = 0.4f),
-                                radius = 18f,
-                                center = Offset(screenPt.x.toFloat(), screenPt.y.toFloat())
-                            )
-                            drawCircle(
-                                color = NeonStrikeGreen,
-                                radius = 9f,
-                                center = Offset(screenPt.x.toFloat(), screenPt.y.toFloat())
-                            )
-                        }
-                    }
+            // 2. AR Overlays: Projected Lane Guides & In-Flight Ball Marker
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                // Render AR projected lane guides over physical lane
+                state.projectedGuides?.let { guides ->
+                    drawProjectedGuides(guides)
                 }
 
-                // Real-time Skeletal Pose Overlay
-                SkeletonOverlay(
-                    pose = state.livePose,
-                    modifier = Modifier.fillMaxSize()
-                )
+                // Render in-flight ball marker
+                if (state.liveTrajectory.isNotEmpty()) {
+                    val lastPt = state.liveTrajectory.last()
+                    val hElements = state.calibration?.homographyMatrixElements
+                    if (hElements != null && hElements.size == 9) {
+                        val m = com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix(
+                            hElements.toDoubleArray()
+                        )
+                        val screenPt = m.forward(
+                            com.example.cebowlinglabtrack.domain.model.LanePoint(lastPt.xBoard, lastPt.yFt)
+                        )
+                        // Glowing optical marker
+                        drawCircle(
+                            color = NeonStrikeGreen.copy(alpha = 0.4f),
+                            radius = 24f,
+                            center = Offset(screenPt.x.toFloat(), screenPt.y.toFloat())
+                        )
+                        drawCircle(
+                            color = NeonStrikeGreen,
+                            radius = 12f,
+                            center = Offset(screenPt.x.toFloat(), screenPt.y.toFloat())
+                        )
+                    }
+                }
             }
 
-            // Top Status & Switcher Header
+            // 3. Real-time Bowler Skeletal Pose Overlay
+            SkeletonOverlay(
+                pose = state.livePose,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // 4. Top Status Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -161,9 +169,11 @@ fun LiveTrackingScreen(
                                 .clip(RoundedCornerShape(5.dp))
                                 .background(
                                     when (state.trackingState) {
-                                        TrackingState.IDLE -> TextMuted
+                                        TrackingState.IDLE -> NeonStrikeGreen
+                                        TrackingState.APPROACH_DETECTED, TrackingState.BALL_RELEASED -> ElectricAmber
+                                        TrackingState.BALL_IN_FLIGHT -> NeonCyan
+                                        TrackingState.PIN_DECK_ENTRY -> PowerCoral
                                         TrackingState.SHOT_COMPLETED -> NeonStrikeGreen
-                                        else -> PowerCoral
                                     }
                                 )
                         )
@@ -182,14 +192,25 @@ fun LiveTrackingScreen(
                         )
                     }
                     Text(
-                        text = "STATE: ${state.trackingState.name.replace("_", " ")}",
-                        color = TextSecondary,
+                        text = when (state.trackingState) {
+                            TrackingState.IDLE -> "STATUS: ARMED • WAITING FOR SHOT"
+                            TrackingState.APPROACH_DETECTED -> "STATUS: APPROACH DETECTED"
+                            TrackingState.BALL_RELEASED -> "STATUS: BALL RELEASED"
+                            TrackingState.BALL_IN_FLIGHT -> "STATUS: TRACKING BALL IN FLIGHT"
+                            TrackingState.PIN_DECK_ENTRY -> "STATUS: PIN DECK IMPACT"
+                            TrackingState.SHOT_COMPLETED -> "STATUS: SHOT RECORDED"
+                        },
+                        color = when (state.trackingState) {
+                            TrackingState.IDLE -> NeonStrikeGreen
+                            TrackingState.BALL_IN_FLIGHT -> NeonCyan
+                            else -> ElectricAmber
+                        },
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                // Actions: Calibration & Review Toggle
+                // Actions: Calibration & NPU Performance Stats
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -216,13 +237,13 @@ fun LiveTrackingScreen(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "NPU: ${state.inferenceLatencyMs}ms",
+                            text = "NPU: ${String.format("%.1f", state.inferenceLatencyMs)}ms",
                             color = NeonStrikeGreen,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${state.fps} FPS LOCKED",
+                            text = "60 FPS LIVE",
                             color = TextMuted,
                             fontSize = 9.sp
                         )
@@ -244,7 +265,7 @@ fun LiveTrackingScreen(
                 }
             }
 
-            // Bottom Controls and Live HUD
+            // 5. Bottom Live Telemetry & Control Card
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -253,48 +274,109 @@ fun LiveTrackingScreen(
             ) {
                 TelemetryHUDCard(metrics = state.liveMetrics)
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
+                // Action Bar: Armed Status + Calibration Shortcut + Offline Debug Toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedButton(
-                        onClick = {
-                            val values = ShotStylePreset.values()
-                            selectedPreset = values[(selectedPreset.ordinal + 1) % values.size]
-                        },
+                    // Arm / Reset Button
+                    Button(
+                        onClick = onArmNextShot,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (state.trackingState == TrackingState.IDLE) DarkSurface else ElectricAmber
+                        ),
                         shape = RoundedCornerShape(12.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Arm Tracker",
+                            tint = if (state.trackingState == TrackingState.IDLE) NeonStrikeGreen else Color.Black,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = selectedPreset.name.replace("_", " "),
-                            fontSize = 11.sp,
+                            text = if (state.trackingState == TrackingState.IDLE) "ARMED" else "RESET",
+                            color = if (state.trackingState == TrackingState.IDLE) NeonStrikeGreen else Color.Black,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
-                    Button(
-                        onClick = { onSimulateShot(selectedPreset) },
-                        enabled = !state.isSimulating,
-                        modifier = Modifier.weight(1.3f),
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonStrikeGreen),
+                    // Calibrate Quick Button
+                    OutlinedButton(
+                        onClick = onNavigateCalibration,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(
-                            imageVector = if (state.isSimulating) Icons.Default.Refresh else Icons.Default.PlayArrow,
-                            contentDescription = "Trigger Shot",
-                            tint = Color.Black
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Calibrate",
+                            tint = NeonCyan,
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (state.isSimulating) "TRACKING..." else "TRIGGER SHOT",
-                            color = Color.Black,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 12.sp
+                            text = "CALIBRATE",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
                         )
+                    }
+
+                    // Small Debug toggle for testing indoors without bowling balls
+                    if (onSimulateShot != null) {
+                        IconButton(
+                            onClick = { showDebugSimulate = !showDebugSimulate },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(DarkSurface.copy(alpha = 0.85f))
+                                .border(1.dp, DarkCardBorder, RoundedCornerShape(12.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Simulate",
+                                tint = if (showDebugSimulate) ElectricAmber else TextMuted
+                            )
+                        }
+                    }
+                }
+
+                // Expandable Offline Simulation Strip (Only if toggled)
+                if (showDebugSimulate && onSimulateShot != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DarkSurface.copy(alpha = 0.95f))
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val values = ShotStylePreset.values()
+                                selectedPreset = values[(selectedPreset.ordinal + 1) % values.size]
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(selectedPreset.name.replace("_", " "), fontSize = 10.sp, color = TextPrimary)
+                        }
+
+                        Button(
+                            onClick = { onSimulateShot(selectedPreset) },
+                            enabled = !state.isSimulating,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricAmber),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("RUN TEST", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -353,4 +435,3 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawProjectedGuides
         center = Offset(guides.headpinPoint.x.toFloat(), guides.headpinPoint.y.toFloat())
     )
 }
-
