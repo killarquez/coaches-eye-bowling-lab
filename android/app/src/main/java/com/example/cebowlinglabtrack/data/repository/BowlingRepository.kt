@@ -45,6 +45,20 @@ class BowlingRepository(context: Context) {
         _shots.value = updated
     }
 
+    suspend fun saveBowler(bowler: BowlerProfile) = withContext(Dispatchers.IO) {
+        dbHelper.insertOrUpdateBowler(bowler)
+        val updated = dbHelper.getAllBowlers()
+        _bowlers.value = updated
+    }
+
+    suspend fun getBowlerById(id: String): BowlerProfile? = withContext(Dispatchers.IO) {
+        dbHelper.getBowlerById(id)
+    }
+
+    suspend fun getShotsByBowlerId(bowlerId: String): List<ShotData> = withContext(Dispatchers.IO) {
+        dbHelper.getShotsByBowlerId(bowlerId)
+    }
+
     suspend fun saveCalibration(calibration: LaneCalibration) = withContext(Dispatchers.IO) {
         dbHelper.insertCalibration(calibration)
         _activeCalibration.value = calibration

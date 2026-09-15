@@ -26,7 +26,8 @@ object TelemetryExtractor {
         trajectory: List<TrajectoryPoint>,
         oilPatternDistanceFt: Double = LaneConstants.DEFAULT_OIL_PATTERN_EXIT_FT,
         measuredRpm: Int? = null,
-        detectedLoftFt: Double? = null
+        detectedLoftFt: Double? = null,
+        opticalRevResult: com.example.cebowlinglabtrack.domain.ml.OpticalRevCounter.OpticalRevResult? = null
     ): SpectoTelemetry {
         if (trajectory.size < 4) {
             return defaultSpectoTelemetry()
@@ -95,8 +96,8 @@ object TelemetryExtractor {
         )
 
         // 4. MOTION PHASES & DYNAMICS
-        val rpm = measuredRpm ?: estimateRpm(launchSpeedMph, breakpointDistanceFt, impactAngleDeg)
-        val powerScore = (launchSpeedMph * (rpm / 1000.0) * 100.0).roundToInt() / 100.0
+        val finalRpm = opticalRevResult?.opticalRpm ?: measuredRpm ?: estimateRpm(launchSpeedMph, breakpointDistanceFt, impactAngleDeg)
+        val powerScore = (launchSpeedMph * (finalRpm / 1000.0) * 100.0).roundToInt() / 100.0
 
         // Motion Phases: Skid, Hook, Roll
         // Read distance is where friction begins to take effect (typically ~55-60% of breakpoint distance)
@@ -108,12 +109,16 @@ object TelemetryExtractor {
         val hookFt = (rollStartFt - skidFt).coerceAtLeast(10.0)
 
         val dynamics = SpectoDynamicsMetrics(
-            rpm = rpm,
+            rpm = finalRpm,
             powerScore = powerScore,
             readFt = round1(readDistanceFt),
             skidFt = round1(skidFt),
             hookFt = round1(hookFt),
-            rollFt = round1(rollFt)
+            rollFt = round1(rollFt),
+            axisTiltDeg = opticalRevResult?.axisTiltDeg ?: 14.0,
+            axisRotationDeg = opticalRevResult?.axisRotationDeg ?: 55.0,
+            totalRotations = opticalRevResult?.totalRotations ?: ((finalRpm / 60.0) * totalDtSec),
+            isOpticalRevCounted = opticalRevResult?.isDetected ?: false
         )
 
         return SpectoTelemetry(
@@ -136,7 +141,12 @@ object TelemetryExtractor {
             breakpointDistanceFt = s.spatial.breakpointDistanceFt,
             launchSpeedMph = s.speed.launchSpeedMph,
             deckSpeedMph = s.speed.entrySpeedMph,
-            entryAngleDeg = s.angles.impactAngleDeg
+            entryAngleDeg = s.angles.impactAngleDeg,
+            axisTiltDeg = s.dynamics.axisTiltDeg,
+            axisRotationDeg = s.dynamics.axisRotationDeg,
+            rpm = s.dynamics.rpm,
+            totalRotations = s.dynamics.totalRotations,
+            isOpticalRevCounted = s.dynamics.isOpticalRevCounted
         )
     }
 

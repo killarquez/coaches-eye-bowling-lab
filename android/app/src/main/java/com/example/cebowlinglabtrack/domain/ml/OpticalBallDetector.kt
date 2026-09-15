@@ -123,12 +123,16 @@ class OpticalBallDetector(
             val aspect = clusterW / max(1.0, clusterH)
 
             if (aspect in 0.25..4.0) {
+                lastBallRadiusPx = ((max(clusterW, clusterH) / 2.0).toInt()).coerceIn(8, 60)
                 return Point2D(cx, cy)
             }
         }
 
         return null
     }
+
+    private var lastBallRadiusPx: Int = 20
+    fun getLastBallRadiusPx(): Int = lastBallRadiusPx
 
     override fun getLastInferenceLatencyMs(): Double = lastLatencyMs
 

@@ -33,8 +33,23 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
             CREATE TABLE bowlers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                email TEXT,
+                phone TEXT,
+                height_inches REAL,
                 handedness TEXT NOT NULL,
-                style TEXT NOT NULL
+                style TEXT NOT NULL,
+                book_average INTEGER,
+                career_high_game INTEGER,
+                career_high_series INTEGER,
+                pap_coordinates TEXT,
+                benchmark_speed REAL,
+                benchmark_rpm INTEGER,
+                benchmark_tilt REAL,
+                benchmark_rotation REAL,
+                sessions_coached INTEGER,
+                last_session_date TEXT,
+                primary_goal TEXT,
+                notes TEXT
             )
             """.trimIndent()
         )
@@ -91,14 +106,97 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
             """.trimIndent()
         )
 
-        // Pre-populate with default bowler
-        val cv = ContentValues().apply {
-            put("id", "bowler-default-1")
-            put("name", "Coach Alfredo")
-            put("handedness", Handedness.RIGHT.name)
-            put("style", BowlingStyle.ONE_HANDED.name)
+        // Pre-populate with official Coach's Eye Bowling Lab Roster
+        val defaultRoster = listOf(
+            BowlerProfile(
+                id = "CEB-101",
+                name = "Marcus Turner",
+                email = "marcus.t@cebowlinglab.com",
+                phone = "(555) 234-5678",
+                heightInches = 71.0,
+                handedness = Handedness.RIGHT,
+                style = BowlingStyle.TWO_HANDED,
+                bookAverage = 194,
+                careerHighGame = 279,
+                careerHighSeries = 698,
+                papCoordinates = "4 3/4\" over by 1/2\" up",
+                benchmarkSpeedMph = 16.2,
+                benchmarkRpm = 460,
+                benchmarkAxisTiltDeg = 14.0,
+                benchmarkAxisRotationDeg = 55.0,
+                totalSessionsCoached = 2,
+                lastSessionDate = "2026-09-02",
+                primaryGoal = "Rev Rate & Ball Speed Synchronization",
+                notes = "Working on 2-handed spine tilt and staying under the ball at the plant."
+            ),
+            BowlerProfile(
+                id = "CEB-102",
+                name = "Elena Rodriguez",
+                email = "elena.r@cebowlinglab.com",
+                phone = "(555) 345-6789",
+                heightInches = 65.0,
+                handedness = Handedness.RIGHT,
+                style = BowlingStyle.ONE_HANDED_THUMB,
+                bookAverage = 182,
+                careerHighGame = 268,
+                careerHighSeries = 642,
+                papCoordinates = "5\" over by 3/4\" up",
+                benchmarkSpeedMph = 14.8,
+                benchmarkRpm = 310,
+                benchmarkAxisTiltDeg = 17.0,
+                benchmarkAxisRotationDeg = 48.0,
+                totalSessionsCoached = 4,
+                lastSessionDate = "2026-09-10",
+                primaryGoal = "Knee Flexion & Slide Consistency",
+                notes = "Focus on 42-degree knee flexion at release to stabilize entry angle."
+            ),
+            BowlerProfile(
+                id = "CEB-103",
+                name = "Coach Alfredo Quilarquez",
+                email = "alfredo@cebowlinglab.com",
+                phone = "(555) 123-4567",
+                heightInches = 70.0,
+                handedness = Handedness.LEFT,
+                style = BowlingStyle.ONE_HANDED_THUMB,
+                bookAverage = 218,
+                careerHighGame = 300,
+                careerHighSeries = 788,
+                papCoordinates = "4 1/2\" over by 1/4\" up",
+                benchmarkSpeedMph = 17.5,
+                benchmarkRpm = 425,
+                benchmarkAxisTiltDeg = 13.0,
+                benchmarkAxisRotationDeg = 62.0,
+                totalSessionsCoached = 14,
+                lastSessionDate = "2026-09-14",
+                primaryGoal = "Specto Trajectory Precision & Range Finders",
+                notes = "Targeting 16th board at 15ft arrows, breakpoint at board 6.6 at 42ft."
+            )
+        )
+
+        for (bowler in defaultRoster) {
+            val cv = ContentValues().apply {
+                put("id", bowler.id)
+                put("name", bowler.name)
+                put("email", bowler.email)
+                put("phone", bowler.phone)
+                put("height_inches", bowler.heightInches)
+                put("handedness", bowler.handedness.name)
+                put("style", bowler.style.name)
+                put("book_average", bowler.bookAverage)
+                put("career_high_game", bowler.careerHighGame)
+                put("career_high_series", bowler.careerHighSeries)
+                put("pap_coordinates", bowler.papCoordinates)
+                put("benchmark_speed", bowler.benchmarkSpeedMph)
+                put("benchmark_rpm", bowler.benchmarkRpm)
+                put("benchmark_tilt", bowler.benchmarkAxisTiltDeg)
+                put("benchmark_rotation", bowler.benchmarkAxisRotationDeg)
+                put("sessions_coached", bowler.totalSessionsCoached)
+                put("last_session_date", bowler.lastSessionDate)
+                put("primary_goal", bowler.primaryGoal)
+                put("notes", bowler.notes)
+            }
+            db.insert("bowlers", null, cv)
         }
-        db.insert("bowlers", null, cv)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -106,6 +204,32 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
         db.execSQL("DROP TABLE IF EXISTS calibrations")
         db.execSQL("DROP TABLE IF EXISTS bowlers")
         onCreate(db)
+    }
+
+    fun insertOrUpdateBowler(bowler: BowlerProfile) {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("id", bowler.id)
+            put("name", bowler.name)
+            put("email", bowler.email)
+            put("phone", bowler.phone)
+            put("height_inches", bowler.heightInches)
+            put("handedness", bowler.handedness.name)
+            put("style", bowler.style.name)
+            put("book_average", bowler.bookAverage)
+            put("career_high_game", bowler.careerHighGame)
+            put("career_high_series", bowler.careerHighSeries)
+            put("pap_coordinates", bowler.papCoordinates)
+            put("benchmark_speed", bowler.benchmarkSpeedMph)
+            put("benchmark_rpm", bowler.benchmarkRpm)
+            put("benchmark_tilt", bowler.benchmarkAxisTiltDeg)
+            put("benchmark_rotation", bowler.benchmarkAxisRotationDeg)
+            put("sessions_coached", bowler.totalSessionsCoached)
+            put("last_session_date", bowler.lastSessionDate)
+            put("primary_goal", bowler.primaryGoal)
+            put("notes", bowler.notes)
+        }
+        db.insertWithOnConflict("bowlers", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
     fun insertShot(shot: ShotData, sessionId: String? = null) {
@@ -166,6 +290,88 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
                     ShotData(
                         shotId = shotId,
                         sessionId = sessionId,
+                        shotNumber = shotNum,
+                        timestamp = timestamp,
+                        bowlerId = bowlerId,
+                        spectoTelemetry = specto,
+                        kinematics = kinematics,
+                        trajectoryPoints = trajectory
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun getShotsByBowlerId(bowlerId: String): List<ShotData> {
+        val list = mutableListOf<ShotData>()
+        val db = readableDatabase
+        val cursor = db.rawQuery("SELECT * FROM shots WHERE bowler_id = ? ORDER BY timestamp DESC", arrayOf(bowlerId))
+        cursor.use { c ->
+            val idxShotId = c.getColumnIndexOrThrow("shot_id")
+            val idxSessionId = c.getColumnIndexOrThrow("session_id")
+            val idxShotNum = c.getColumnIndexOrThrow("shot_number")
+            val idxTimestamp = c.getColumnIndexOrThrow("timestamp")
+            val idxBowlerId = c.getColumnIndexOrThrow("bowler_id")
+            val idxSpecto = c.getColumnIndexOrThrow("specto_telemetry_json")
+            val idxKinematics = c.getColumnIndexOrThrow("kinematics_json")
+            val idxTrajectory = c.getColumnIndexOrThrow("trajectory_json")
+
+            while (c.moveToNext()) {
+                val shotId = c.getString(idxShotId)
+                val sessionId = c.getString(idxSessionId)
+                val shotNum = c.getInt(idxShotNum)
+                val timestamp = c.getString(idxTimestamp)
+                val bId = c.getString(idxBowlerId)
+                val specto = json.decodeFromString<SpectoTelemetry>(c.getString(idxSpecto))
+                val kinematics = json.decodeFromString<BowlerKinematics>(c.getString(idxKinematics))
+                val trajectory = json.decodeFromString<List<TrajectoryPoint>>(c.getString(idxTrajectory))
+
+                list.add(
+                    ShotData(
+                        shotId = shotId,
+                        sessionId = sessionId,
+                        shotNumber = shotNum,
+                        timestamp = timestamp,
+                        bowlerId = bId,
+                        spectoTelemetry = specto,
+                        kinematics = kinematics,
+                        trajectoryPoints = trajectory
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun getShotsBySessionId(sessionId: String): List<ShotData> {
+        val list = mutableListOf<ShotData>()
+        val db = readableDatabase
+        val cursor = db.rawQuery("SELECT * FROM shots WHERE session_id = ? ORDER BY shot_number ASC", arrayOf(sessionId))
+        cursor.use { c ->
+            val idxShotId = c.getColumnIndexOrThrow("shot_id")
+            val idxSessionId = c.getColumnIndexOrThrow("session_id")
+            val idxShotNum = c.getColumnIndexOrThrow("shot_number")
+            val idxTimestamp = c.getColumnIndexOrThrow("timestamp")
+            val idxBowlerId = c.getColumnIndexOrThrow("bowler_id")
+            val idxSpecto = c.getColumnIndexOrThrow("specto_telemetry_json")
+            val idxKinematics = c.getColumnIndexOrThrow("kinematics_json")
+            val idxTrajectory = c.getColumnIndexOrThrow("trajectory_json")
+
+            while (c.moveToNext()) {
+                val shotId = c.getString(idxShotId)
+                val sId = c.getString(idxSessionId)
+                val shotNum = c.getInt(idxShotNum)
+                val timestamp = c.getString(idxTimestamp)
+                val bowlerId = c.getString(idxBowlerId)
+                val specto = json.decodeFromString<SpectoTelemetry>(c.getString(idxSpecto))
+                val kinematics = json.decodeFromString<BowlerKinematics>(c.getString(idxKinematics))
+                val trajectory = json.decodeFromString<List<TrajectoryPoint>>(c.getString(idxTrajectory))
+
+                list.add(
+                    ShotData(
+                        shotId = shotId,
+                        sessionId = sId,
                         shotNumber = shotNum,
                         timestamp = timestamp,
                         bowlerId = bowlerId,
@@ -261,29 +467,77 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
         return null
     }
 
+    fun getBowlerById(id: String): BowlerProfile? {
+        val db = readableDatabase
+        val cursor = db.rawQuery("SELECT * FROM bowlers WHERE id = ?", arrayOf(id))
+        cursor.use { c ->
+            if (c.moveToNext()) {
+                return parseBowlerFromCursor(c)
+            }
+        }
+        return null
+    }
+
     fun getAllBowlers(): List<BowlerProfile> {
         val list = mutableListOf<BowlerProfile>()
         val db = readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM bowlers", null)
+        val cursor = db.rawQuery("SELECT * FROM bowlers ORDER BY name ASC", null)
         cursor.use { c ->
-            val idxId = c.getColumnIndexOrThrow("id")
-            val idxName = c.getColumnIndexOrThrow("name")
-            val idxHand = c.getColumnIndexOrThrow("handedness")
-            val idxStyle = c.getColumnIndexOrThrow("style")
-
             while (c.moveToNext()) {
-                val id = c.getString(idxId)
-                val name = c.getString(idxName)
-                val hand = Handedness.valueOf(c.getString(idxHand))
-                val style = BowlingStyle.valueOf(c.getString(idxStyle))
-                list.add(BowlerProfile(id, name, hand, style))
+                list.add(parseBowlerFromCursor(c))
             }
         }
         return list
     }
 
+    private fun parseBowlerFromCursor(c: android.database.Cursor): BowlerProfile {
+        val id = c.getString(c.getColumnIndexOrThrow("id"))
+        val name = c.getString(c.getColumnIndexOrThrow("name"))
+        val email = c.getString(c.getColumnIndexOrThrow("email")) ?: ""
+        val phone = c.getString(c.getColumnIndexOrThrow("phone")) ?: ""
+        val heightInches = c.getDouble(c.getColumnIndexOrThrow("height_inches"))
+        val handStr = c.getString(c.getColumnIndexOrThrow("handedness"))
+        val handedness = runCatching { Handedness.valueOf(handStr) }.getOrDefault(Handedness.RIGHT)
+        val styleStr = c.getString(c.getColumnIndexOrThrow("style"))
+        val style = runCatching { BowlingStyle.valueOf(styleStr) }.getOrDefault(BowlingStyle.TWO_HANDED)
+        val bookAverage = c.getInt(c.getColumnIndexOrThrow("book_average"))
+        val careerHighGame = c.getInt(c.getColumnIndexOrThrow("career_high_game"))
+        val careerHighSeries = c.getInt(c.getColumnIndexOrThrow("career_high_series"))
+        val papCoordinates = c.getString(c.getColumnIndexOrThrow("pap_coordinates")) ?: ""
+        val benchmarkSpeed = c.getDouble(c.getColumnIndexOrThrow("benchmark_speed"))
+        val benchmarkRpm = c.getInt(c.getColumnIndexOrThrow("benchmark_rpm"))
+        val benchmarkTilt = c.getDouble(c.getColumnIndexOrThrow("benchmark_tilt"))
+        val benchmarkRotation = c.getDouble(c.getColumnIndexOrThrow("benchmark_rotation"))
+        val sessionsCoached = c.getInt(c.getColumnIndexOrThrow("sessions_coached"))
+        val lastSessionDate = c.getString(c.getColumnIndexOrThrow("last_session_date")) ?: ""
+        val primaryGoal = c.getString(c.getColumnIndexOrThrow("primary_goal")) ?: ""
+        val notes = c.getString(c.getColumnIndexOrThrow("notes")) ?: ""
+
+        return BowlerProfile(
+            id = id,
+            name = name,
+            email = email,
+            phone = phone,
+            heightInches = if (heightInches > 0) heightInches else 70.0,
+            handedness = handedness,
+            style = style,
+            bookAverage = if (bookAverage > 0) bookAverage else 190,
+            careerHighGame = if (careerHighGame > 0) careerHighGame else 279,
+            careerHighSeries = if (careerHighSeries > 0) careerHighSeries else 650,
+            papCoordinates = if (papCoordinates.isNotBlank()) papCoordinates else "4 3/4\" over by 1/2\" up",
+            benchmarkSpeedMph = if (benchmarkSpeed > 0) benchmarkSpeed else 16.0,
+            benchmarkRpm = if (benchmarkRpm > 0) benchmarkRpm else 400,
+            benchmarkAxisTiltDeg = if (benchmarkTilt > 0) benchmarkTilt else 14.0,
+            benchmarkAxisRotationDeg = if (benchmarkRotation > 0) benchmarkRotation else 55.0,
+            totalSessionsCoached = sessionsCoached,
+            lastSessionDate = lastSessionDate,
+            primaryGoal = primaryGoal,
+            notes = notes
+        )
+    }
+
     companion object {
         const val DATABASE_NAME = "ce_bowling_track.db"
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = 3
     }
 }

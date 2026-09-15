@@ -357,6 +357,22 @@ fun LaneTraxReviewView(
                         LaneTraxMetricCard("Deflection", "${sp.pinDeckDeflection}", "b", cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        LaneTraxMetricCard("Axis Tilt", "${dy.axisTiltDeg}°", if (dy.isOpticalRevCounted) "Optical" else "Est", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Axis Rotation", "${dy.axisRotationDeg}°", if (dy.isOpticalRevCounted) "Optical" else "Est", cardBackground, cardBorder, Modifier.weight(1f))
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        LaneTraxMetricCard("Total Revs", "${dy.totalRotations}", "revs", cardBackground, cardBorder, Modifier.weight(1f))
+                        LaneTraxMetricCard("Accuracy", "${dy.accuracyScore.toInt()}", "Pro <50", cardBackground, cardBorder, Modifier.weight(1f))
+                    }
+
                     // Next Shot Trigger button
                     Button(
                         onClick = onNewShot,

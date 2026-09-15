@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LineAxis
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tune
@@ -35,6 +36,7 @@ import com.example.cebowlinglabtrack.theme.TextMuted
 import com.example.cebowlinglabtrack.theme.TextPrimary
 import com.example.cebowlinglabtrack.ui.TrackingViewModel
 import com.example.cebowlinglabtrack.ui.screens.CalibrationScreen
+import com.example.cebowlinglabtrack.ui.screens.HomeScreen
 import com.example.cebowlinglabtrack.ui.screens.KinematicsDetailScreen
 import com.example.cebowlinglabtrack.ui.screens.LiveTrackingScreen
 import com.example.cebowlinglabtrack.ui.screens.SessionHistoryScreen
@@ -44,6 +46,7 @@ import com.example.cebowlinglabtrack.theme.UsbcGold
 import com.example.cebowlinglabtrack.theme.UsbcNavyLight
 
 enum class BowlingScreenTab(val title: String, val icon: ImageVector) {
+    HOME("Home", Icons.Default.Home),
     TRACK("Live Track", Icons.Default.Videocam),
     LANE_2D("2D Lane", Icons.Default.LineAxis),
     KINEMATICS("Kinematics", Icons.Default.Person),
@@ -58,7 +61,7 @@ fun MainNavigation(
     val uiState by viewModel.uiState.collectAsState()
     val savedShots by viewModel.savedShots.collectAsState()
 
-    var currentTab by remember { mutableStateOf(BowlingScreenTab.TRACK) }
+    var currentTab by remember { mutableStateOf(BowlingScreenTab.HOME) }
 
     Scaffold(
         bottomBar = {
@@ -101,6 +104,21 @@ fun MainNavigation(
                 .background(DarkBackground)
         ) {
             when (currentTab) {
+                BowlingScreenTab.HOME -> {
+                    HomeScreen(
+                        activeBowler = uiState.activeBowler,
+                        allBowlers = uiState.allBowlers,
+                        savedShots = savedShots,
+                        isOpticalRevActive = uiState.isOpticalRevModeActive,
+                        onSelectBowler = { bowler -> viewModel.selectBowler(bowler) },
+                        onSaveBowler = { bowler -> viewModel.saveBowler(bowler) },
+                        onToggleOpticalRev = { active -> viewModel.toggleOpticalRevMode(active) },
+                        onStartTrainingSession = {
+                            viewModel.armForNextShot()
+                            currentTab = BowlingScreenTab.TRACK
+                        }
+                    )
+                }
                 BowlingScreenTab.TRACK -> {
                     LiveTrackingScreen(
                         state = uiState,

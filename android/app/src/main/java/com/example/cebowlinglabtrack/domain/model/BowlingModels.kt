@@ -14,7 +14,10 @@ data class TrajectoryPoint(
     val vx: Double = 0.0,
     val vy: Double = 0.0,
     val isFiltered: Boolean = true
-)
+) {
+    val board: Double get() = xBoard
+    val timestampMs: Long get() = timeMs
+}
 
 /**
  * Specto Telemetry - Spatial Metrics (Boards and Longitudinal Distances).
@@ -65,7 +68,11 @@ data class SpectoDynamicsMetrics(
     @SerialName("hook_ft") val hookFt: Double,
     @SerialName("roll_ft") val rollFt: Double,
     @SerialName("accuracy_score") val accuracyScore: Double = 96.2,
-    @SerialName("skill_tier") val skillTier: String = "PRO L1"
+    @SerialName("skill_tier") val skillTier: String = "PRO L1",
+    @SerialName("axis_tilt_deg") val axisTiltDeg: Double = 14.0,
+    @SerialName("axis_rotation_deg") val axisRotationDeg: Double = 55.0,
+    @SerialName("total_rotations") val totalRotations: Double = 14.0,
+    @SerialName("is_optical_rev_counted") val isOpticalRevCounted: Boolean = false
 )
 
 /**
@@ -128,7 +135,12 @@ data class ShotData(
         breakpointDistanceFt = spectoTelemetry.spatial.breakpointDistanceFt,
         launchSpeedMph = spectoTelemetry.speed.launchSpeedMph,
         deckSpeedMph = spectoTelemetry.speed.entrySpeedMph,
-        entryAngleDeg = spectoTelemetry.angles.impactAngleDeg
+        entryAngleDeg = spectoTelemetry.angles.impactAngleDeg,
+        axisTiltDeg = spectoTelemetry.dynamics.axisTiltDeg,
+        axisRotationDeg = spectoTelemetry.dynamics.axisRotationDeg,
+        rpm = spectoTelemetry.dynamics.rpm,
+        totalRotations = spectoTelemetry.dynamics.totalRotations,
+        isOpticalRevCounted = spectoTelemetry.dynamics.isOpticalRevCounted
     )
 }
 
@@ -143,7 +155,12 @@ data class BallMetrics(
     val breakpointDistanceFt: Double,
     val launchSpeedMph: Double,
     val deckSpeedMph: Double,
-    val entryAngleDeg: Double
+    val entryAngleDeg: Double,
+    val axisTiltDeg: Double = 14.0,
+    val axisRotationDeg: Double = 55.0,
+    val rpm: Int = 435,
+    val totalRotations: Double = 14.0,
+    val isOpticalRevCounted: Boolean = false
 )
 
 /**
@@ -200,14 +217,40 @@ data class SpectoSessionStats(
 enum class Handedness { RIGHT, LEFT }
 
 @Serializable
-enum class BowlingStyle { ONE_HANDED, TWO_HANDED }
+enum class BowlingStyle {
+    ONE_HANDED,           // Legacy compatibility
+    ONE_HANDED_THUMB,     // 1-Handed (Thumb In)
+    ONE_HANDED_NO_THUMB,  // 1-Handed (No Thumb)
+    TWO_HANDED;           // 2-Handed
+
+    fun displayName(): String = when (this) {
+        ONE_HANDED, ONE_HANDED_THUMB -> "1-Handed (Thumb In)"
+        ONE_HANDED_NO_THUMB -> "1-Handed (No Thumb)"
+        TWO_HANDED -> "2-Handed"
+    }
+}
 
 @Serializable
 data class BowlerProfile(
-    val id: String,
-    val name: String,
+    val id: String, // e.g. "CEB-101"
+    val name: String, // e.g. "Marcus Turner"
+    val email: String = "",
+    val phone: String = "",
+    val heightInches: Double = 70.0,
     val handedness: Handedness = Handedness.RIGHT,
-    val style: BowlingStyle = BowlingStyle.ONE_HANDED
+    val style: BowlingStyle = BowlingStyle.TWO_HANDED,
+    val bookAverage: Int = 194,
+    val careerHighGame: Int = 279,
+    val careerHighSeries: Int = 698,
+    val papCoordinates: String = "4 3/4\" over by 1/2\" up",
+    val benchmarkSpeedMph: Double = 16.2,
+    val benchmarkRpm: Int = 460,
+    val benchmarkAxisTiltDeg: Double = 14.0,
+    val benchmarkAxisRotationDeg: Double = 55.0,
+    val totalSessionsCoached: Int = 2,
+    val lastSessionDate: String = "2026-09-02",
+    val primaryGoal: String = "Rev Rate & Ball Speed Synchronization",
+    val notes: String = ""
 )
 
 object LaneConstants {

@@ -11,12 +11,14 @@ import com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix
 import com.example.cebowlinglabtrack.domain.calibration.LaneCalibrator
 import com.example.cebowlinglabtrack.domain.calibration.ProjectedLaneGuides
 import com.example.cebowlinglabtrack.domain.kinematics.PoseFrame
+import com.example.cebowlinglabtrack.domain.ml.OpticalRevCounter
 import com.example.cebowlinglabtrack.domain.ml.OpticalBallDetector
 import com.example.cebowlinglabtrack.domain.ml.PinDeckDetector
 import com.example.cebowlinglabtrack.domain.ml.ShotStylePreset
 import com.example.cebowlinglabtrack.domain.ml.SimulatedShotGenerator
 import com.example.cebowlinglabtrack.domain.model.BallMetrics
 import com.example.cebowlinglabtrack.domain.model.BowlerKinematics
+import com.example.cebowlinglabtrack.domain.model.BowlerProfile
 import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.Point2D
@@ -59,7 +61,10 @@ data class TrackingUiState(
     val ballNumber: Int = 1, // 1st ball (1 dot) vs 2nd ball (2 dots)
     val pinfallResult: PinDeckDetector.PinfallResult? = null,
     val standingPins: List<Int> = listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
-    val tripodStatus: TripodAngleAdvisor.TripodStatus = TripodAngleAdvisor.TripodStatus()
+    val tripodStatus: TripodAngleAdvisor.TripodStatus = TripodAngleAdvisor.TripodStatus(),
+    val activeBowler: BowlerProfile? = null,
+    val allBowlers: List<BowlerProfile> = emptyList(),
+    val isOpticalRevModeActive: Boolean = true
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -71,6 +76,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     private var homography: HomographyMatrix = HomographyMatrix.identity()
     private val trajectoryTracker = TrajectoryTracker(homography)
     private val opticalBallDetector = OpticalBallDetector(homography)
+    private val opticalRevCounter = OpticalRevCounter()
     private val pinDeckDetector = PinDeckDetector(homography)
     private val tripodAngleAdvisor = TripodAngleAdvisor(application)
 
@@ -91,6 +97,21 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             tripodAngleAdvisor.status.collect { status ->
                 _uiState.value = _uiState.value.copy(tripodStatus = status)
+            }
+        }
+
+        viewModelScope.launch {
+            repository.bowlers.collect { roster ->
+                val current = _uiState.value.activeBowler
+                val updatedActive = if (current != null) {
+                    roster.find { it.id == current.id } ?: roster.firstOrNull()
+                } else {
+                    roster.firstOrNull()
+                }
+                _uiState.value = _uiState.value.copy(
+                    allBowlers = roster,
+                    activeBowler = updatedActive
+                )
             }
         }
 
@@ -171,7 +192,21 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         val detectedCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
         val latency = opticalBallDetector.getLastInferenceLatencyMs()
 
-        // 2. Feed centroid into Extended Kalman Filter state machine
+        // 2. If ball is detected, feed high-contrast tape sub-region into Optical Rev Counter
+        if (detectedCentroid != null && _uiState.value.isOpticalRevModeActive) {
+            val ballRadiusPx = opticalBallDetector.getLastBallRadiusPx()
+            opticalRevCounter.processFrame(
+                imageBytes = imageBytes,
+                width = width,
+                height = height,
+                stride = stride,
+                ballCenter = detectedCentroid,
+                ballRadiusPx = ballRadiusPx,
+                timestampMs = timestampMs
+            )
+        }
+
+        // 3. Feed centroid into Extended Kalman Filter state machine
         trajectoryTracker.onBallCentroidDetected(detectedCentroid, timestampMs)
         val currentState = trajectoryTracker.state
 
@@ -180,15 +215,31 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             val pinResult = pinDeckDetector.evaluatePinfall(imageBytes, width, height, stride)
 
             val trajectory = trajectoryTracker.trajectory
-            val spectoTelemetry = TelemetryExtractor.extractSpectoTelemetry(trajectory)
+            val durationMs = if (trajectory.size >= 2) {
+                (trajectory.last().timestampMs - trajectory.first().timestampMs).coerceAtLeast(1000L)
+            } else 1800L
+
+            val opticalRevResult = if (_uiState.value.isOpticalRevModeActive) {
+                opticalRevCounter.evaluateShotRevRate(
+                    shotDurationMs = durationMs,
+                    fallbackRpm = _uiState.value.activeBowler?.benchmarkRpm ?: 400
+                )
+            } else null
+
+            val spectoTelemetry = TelemetryExtractor.extractSpectoTelemetry(
+                trajectory = trajectory,
+                opticalRevResult = opticalRevResult
+            )
             val targetComp = _uiState.value.activeTargetLine.compareShot(trajectory)
             val shotCount = repository.shots.value.size + 1
+            val currentBowlerId = _uiState.value.activeBowler?.id ?: "CEB-101"
 
             val completedShot = ShotData(
                 shotId = UUID.randomUUID().toString(),
-                sessionId = "session_live_${System.currentTimeMillis()}",
+                sessionId = "session_${currentBowlerId}_${System.currentTimeMillis()}",
                 shotNumber = shotCount,
                 timestamp = java.time.Instant.now().toString(),
+                bowlerId = currentBowlerId,
                 spectoTelemetry = spectoTelemetry,
                 kinematics = _uiState.value.liveKinematics ?: BowlerKinematics(
                     spineLateralTiltDeg = 18.0,
@@ -309,6 +360,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     fun armForNextShot() {
         trajectoryTracker.reset()
         opticalBallDetector.resetBaseline()
+        opticalRevCounter.reset()
         _uiState.value = _uiState.value.copy(
             activeShot = null,
             liveTrajectory = emptyList(),
@@ -391,6 +443,32 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
+     * Selects an athlete from the roster as the active bowler.
+     */
+    fun selectBowler(bowler: BowlerProfile) {
+        _uiState.value = _uiState.value.copy(activeBowler = bowler)
+    }
+
+    /**
+     * Adds or updates a bowler profile and sets them as active.
+     */
+    fun saveBowler(bowler: BowlerProfile) {
+        viewModelScope.launch {
+            repository.saveBowler(bowler)
+            _uiState.value = _uiState.value.copy(activeBowler = bowler)
+        }
+    }
+
+    /**
+     * Toggles the direct optical rev counter (tape COG to PAP).
+     */
+    fun toggleOpticalRevMode(active: Boolean? = null) {
+        _uiState.value = _uiState.value.copy(
+            isOpticalRevModeActive = active ?: !_uiState.value.isOpticalRevModeActive
+        )
+    }
+
+    /**
      * Optional manual simulation fallback for testing offline without camera.
      */
     fun simulateShot(preset: ShotStylePreset = ShotStylePreset.POWER_CRANKER) {
@@ -404,6 +482,12 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             )
 
             val fullShot = SimulatedShotGenerator.generateShot(preset = preset)
+            val currentBowlerId = _uiState.value.activeBowler?.id ?: "CEB-101"
+            val taggedShot = fullShot.copy(
+                bowlerId = currentBowlerId,
+                sessionId = "session_${currentBowlerId}_${System.currentTimeMillis()}"
+            )
+
             val approachPoses = SimulatedShotGenerator.generateApproachPoseSequence(
                 totalDurationMs = 1200L,
                 fps = 30,
@@ -417,10 +501,10 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
             _uiState.value = _uiState.value.copy(
                 trackingState = TrackingState.BALL_RELEASED,
-                liveKinematics = fullShot.kinematics
+                liveKinematics = taggedShot.kinematics
             )
 
-            val trajectory = fullShot.trajectoryPoints
+            val trajectory = taggedShot.trajectoryPoints
             val livePoints = mutableListOf<TrajectoryPoint>()
 
             for (i in trajectory.indices) {
@@ -438,17 +522,17 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 delay(16)
             }
 
-            val targetComp = _uiState.value.activeTargetLine.compareShot(fullShot.trajectoryPoints)
+            val targetComp = _uiState.value.activeTargetLine.compareShot(taggedShot.trajectoryPoints)
 
             _uiState.value = _uiState.value.copy(
-                activeShot = fullShot,
-                liveMetrics = fullShot.ballMetrics,
+                activeShot = taggedShot,
+                liveMetrics = taggedShot.ballMetrics,
                 trackingState = TrackingState.SHOT_COMPLETED,
                 isSimulating = false,
                 targetComparison = targetComp
             )
 
-            repository.saveShot(fullShot)
+            repository.saveShot(taggedShot)
         }
     }
 }
