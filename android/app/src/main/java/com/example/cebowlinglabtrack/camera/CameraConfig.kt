@@ -1,6 +1,5 @@
 package com.example.cebowlinglabtrack.camera
 
-import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.util.Range
 import androidx.annotation.OptIn
@@ -11,6 +10,9 @@ import androidx.camera.core.ImageAnalysis
 /**
  * Camera 3A configuration options for bowling lane capture.
  *
+ * Defaults to 120 FPS high-speed capture (supported on Snapdragon 8 Elite / Galaxy S25 Ultra)
+ * with automatic fallback to 60 FPS.
+ *
  * Mandatory locks for bowling lane optical tracking:
  * - Exposure locked (AE OFF, fixed shutter speed ~1/500s to 1/1000s) to freeze high-velocity ball motion.
  * - Fixed ISO to prevent exposure hunting during ball roll.
@@ -18,8 +20,8 @@ import androidx.camera.core.ImageAnalysis
  * - Autofocus locked (AF OFF) at hyperfocal distance (~25-35 ft) so entire lane remains in focus.
  */
 data class Camera3AConfig(
-    val targetFps: Int = 60,
-    val exposureTimeNs: Long = 2_000_000L, // 1/500 second (2 milliseconds)
+    val targetFps: Int = 120,
+    val exposureTimeNs: Long = 1_000_000L, // 1/1000 second (1 millisecond) for 120 FPS
     val isoSensitivity: Int = 800,
     val hyperfocalDiopters: Float = 0.12f, // 1 / 8.3 meters ~ 27 feet down-lane
     val lockAe: Boolean = true,
@@ -30,19 +32,42 @@ data class Camera3AConfig(
 object CameraPipelineHelper {
 
     /**
+     * Determines the optimal available FPS range, preferring 120 FPS on flagship hardware,
+     * falling back to 60 FPS or 30 FPS.
+     */
+    fun selectOptimalFpsRange(supportedRanges: Array<Range<Int>>?): Range<Int> {
+        if (supportedRanges == null || supportedRanges.isEmpty()) return Range(120, 120)
+
+        // Check if exact 120 FPS is available
+        val r120 = supportedRanges.firstOrNull { it.upper >= 120 }
+        if (r120 != null) {
+            return Range(120, 120)
+        }
+
+        // Check 60 FPS
+        val r60 = supportedRanges.firstOrNull { it.upper >= 60 }
+        if (r60 != null) {
+            return Range(60, 60)
+        }
+
+        return supportedRanges.maxByOrNull { it.upper } ?: Range(30, 30)
+    }
+
+    /**
      * Applies manual 3A lock controls to CameraX ImageAnalysis via Camera2Interop.
      */
     @OptIn(ExperimentalCamera2Interop::class)
     fun applyManual3AControls(
         builder: ImageAnalysis.Builder,
-        config: Camera3AConfig = Camera3AConfig()
+        config: Camera3AConfig = Camera3AConfig(),
+        fpsRange: Range<Int> = Range(config.targetFps, config.targetFps)
     ) {
         val interop = Camera2Interop.Extender(builder)
 
-        // 1. Target High FPS Range (e.g. 60 FPS)
+        // 1. Target High FPS Range (120 FPS / 60 FPS)
         interop.setCaptureRequestOption(
             CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-            Range(config.targetFps, config.targetFps)
+            fpsRange
         )
 
         // 2. Lock Auto-Exposure and set manual shutter + ISO

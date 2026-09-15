@@ -3,9 +3,11 @@ package com.example.cebowlinglabtrack.camera
 import android.Manifest
 import android.content.pm.PackageManager
 import android.util.Log
+import android.util.Range
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -60,12 +62,14 @@ import com.example.cebowlinglabtrack.theme.TextSecondary
 import java.util.concurrent.Executors
 
 /**
- * Live CameraX Preview Composable with runtime permission handling,
- * manual 3A controls, and frame dispatch to optical CV analyzers.
+ * Live CameraX Preview Composable with 120 FPS high-speed support,
+ * hardware zoom control, and frame dispatch to optical CV analyzers.
  */
 @Composable
 fun CameraPreviewView(
     onFrameAvailable: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, timestampMs: Long) -> Unit)? = null,
+    zoomRatio: Float = 1.0f,
+    targetFps: Int = 120,
     modifier: Modifier = Modifier,
     overlayContent: @Composable BoxScope.() -> Unit = {}
 ) {
@@ -88,6 +92,13 @@ fun CameraPreviewView(
         if (!hasCameraPermission) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    var cameraInstance by remember { mutableStateOf<Camera?>(null) }
+
+    // Respond to zoom ratio changes
+    LaunchedEffect(zoomRatio, cameraInstance) {
+        cameraInstance?.cameraControl?.setZoomRatio(zoomRatio.coerceIn(1.0f, 5.0f))
     }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -130,8 +141,13 @@ fun CameraPreviewView(
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
 
-                            // Apply fixed 3A locks (shutter ~1/500s, hyperfocal focus ~28 ft)
-                            CameraPipelineHelper.applyManual3AControls(analysisBuilder)
+                            // Apply fixed 3A locks (shutter ~1/1000s, 120 FPS / 60 FPS range)
+                            val fpsRange = Range(targetFps, targetFps)
+                            CameraPipelineHelper.applyManual3AControls(
+                                builder = analysisBuilder,
+                                config = Camera3AConfig(targetFps = targetFps),
+                                fpsRange = fpsRange
+                            )
 
                             val imageAnalysis = analysisBuilder.build()
 
@@ -160,12 +176,14 @@ fun CameraPreviewView(
                             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
                             cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
+                            val boundCamera = cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
                                 cameraSelector,
                                 preview,
                                 imageAnalysis
                             )
+                            cameraInstance = boundCamera
+                            boundCamera.cameraControl.setZoomRatio(zoomRatio.coerceIn(1.0f, 5.0f))
                         } catch (e: Exception) {
                             Log.e("CameraPreviewView", "Failed to bind camera use cases", e)
                         }
@@ -214,7 +232,7 @@ fun CameraPreviewView(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "CE Bowling Lab needs camera access to perform live optical ball tracking, lane calibration, and shot video replay on the approach.",
+                    text = "CE Bowling Lab needs camera access to perform live 120 FPS optical tracking, auto-lane calibration, and shot video replay on the approach.",
                     color = TextSecondary,
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,

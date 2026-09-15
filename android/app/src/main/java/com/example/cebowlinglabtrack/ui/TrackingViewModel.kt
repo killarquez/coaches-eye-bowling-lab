@@ -3,6 +3,7 @@ package com.example.cebowlinglabtrack.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.cebowlinglabtrack.camera.TripodAngleAdvisor
 import com.example.cebowlinglabtrack.data.export.ShotJsonExporter
 import com.example.cebowlinglabtrack.data.repository.BowlingRepository
 import com.example.cebowlinglabtrack.domain.calibration.AutoLaneDetector
@@ -11,6 +12,7 @@ import com.example.cebowlinglabtrack.domain.calibration.LaneCalibrator
 import com.example.cebowlinglabtrack.domain.calibration.ProjectedLaneGuides
 import com.example.cebowlinglabtrack.domain.kinematics.PoseFrame
 import com.example.cebowlinglabtrack.domain.ml.OpticalBallDetector
+import com.example.cebowlinglabtrack.domain.ml.PinDeckDetector
 import com.example.cebowlinglabtrack.domain.ml.ShotStylePreset
 import com.example.cebowlinglabtrack.domain.ml.SimulatedShotGenerator
 import com.example.cebowlinglabtrack.domain.model.BallMetrics
@@ -43,9 +45,14 @@ data class TrackingUiState(
     val calibration: LaneCalibration? = null,
     val projectedGuides: ProjectedLaneGuides? = null,
     val inferenceLatencyMs: Double = 2.4, // Real optical differencing latency <3ms
-    val fps: Int = 60,
+    val fps: Int = 120, // 120 FPS high-speed target
     val isTrackingActive: Boolean = false,
-    val isSimulating: Boolean = false
+    val isSimulating: Boolean = false,
+    val zoomRatio: Float = 1.0f,
+    val ballNumber: Int = 1, // 1st ball (1 dot) vs 2nd ball (2 dots)
+    val pinfallResult: PinDeckDetector.PinfallResult? = null,
+    val standingPins: List<Int> = listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+    val tripodStatus: TripodAngleAdvisor.TripodStatus = TripodAngleAdvisor.TripodStatus()
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -57,6 +64,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     private var homography: HomographyMatrix = HomographyMatrix.identity()
     private val trajectoryTracker = TrajectoryTracker(homography)
     private val opticalBallDetector = OpticalBallDetector(homography)
+    private val pinDeckDetector = PinDeckDetector(homography)
+    private val tripodAngleAdvisor = TripodAngleAdvisor(application)
 
     private val _uiState = MutableStateFlow(TrackingUiState())
     val uiState: StateFlow<TrackingUiState> = _uiState.asStateFlow()
@@ -70,6 +79,14 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     private var simulationJob: Job? = null
 
     init {
+        tripodAngleAdvisor.startListening()
+
+        viewModelScope.launch {
+            tripodAngleAdvisor.status.collect { status ->
+                _uiState.value = _uiState.value.copy(tripodStatus = status)
+            }
+        }
+
         viewModelScope.launch {
             repository.loadInitialData()
             val existingCalib = repository.activeCalibration.value
@@ -77,6 +94,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 homography = HomographyMatrix(existingCalib.homographyMatrixElements.toDoubleArray())
                 opticalBallDetector.updateHomography(homography)
                 trajectoryTracker.updateHomography(homography)
+                pinDeckDetector.updateHomography(homography)
                 val guides = calibrator.generateProjectedGuides(homography)
                 _uiState.value = _uiState.value.copy(
                     calibration = existingCalib,
@@ -88,6 +106,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 homography = defaultH
                 opticalBallDetector.updateHomography(homography)
                 trajectoryTracker.updateHomography(homography)
+                pinDeckDetector.updateHomography(homography)
                 val guides = calibrator.generateProjectedGuides(homography)
                 _uiState.value = _uiState.value.copy(
                     calibration = defaultCalib,
@@ -98,8 +117,13 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        tripodAngleAdvisor.stopListening()
+    }
+
     /**
-     * Processes live CameraX Y-plane frames at 60-120 FPS.
+     * Processes live CameraX Y-plane frames at 120 FPS.
      */
     fun processLiveFrame(
         imageBytes: ByteArray,
@@ -112,7 +136,12 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             return
         }
 
-        // 1. Run real-time optical ball centroid detection
+        // Before ball is launched, ensure baseline pin status is primed
+        if (_uiState.value.trackingState == TrackingState.IDLE) {
+            pinDeckDetector.captureBaselinePins(imageBytes, width, height, stride)
+        }
+
+        // 1. Run real-time optical ball centroid detection (<3ms)
         val detectedCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
         val latency = opticalBallDetector.getLastInferenceLatencyMs()
 
@@ -121,7 +150,9 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         val currentState = trajectoryTracker.state
 
         if (currentState == TrackingState.SHOT_COMPLETED) {
-            // Ball reached pin deck (Y >= 60 ft) -> Extract 22 Specto metrics & auto-save shot
+            // Ball reached pin deck (Y >= 60 ft) -> Evaluate optical pinfall
+            val pinResult = pinDeckDetector.evaluatePinfall(imageBytes, width, height, stride)
+
             val trajectory = trajectoryTracker.trajectory
             val spectoTelemetry = TelemetryExtractor.extractSpectoTelemetry(trajectory)
             val shotCount = repository.shots.value.size + 1
@@ -151,7 +182,10 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                     liveTrajectory = trajectory,
                     liveMetrics = completedShot.ballMetrics,
                     trackingState = TrackingState.SHOT_COMPLETED,
-                    inferenceLatencyMs = latency
+                    inferenceLatencyMs = latency,
+                    pinfallResult = pinResult,
+                    standingPins = pinResult.standingPins,
+                    ballNumber = pinResult.ballNumber
                 )
             }
         } else {
@@ -165,7 +199,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Auto-detects the lane and computes calibration in 1 click from a camera frame.
+     * Auto-detects the lane and computes calibration + optimal auto-zoom in 1 click.
      */
     fun autoCalibrateFromFrame(
         imageBytes: ByteArray,
@@ -180,11 +214,13 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             homography = newH
             opticalBallDetector.updateHomography(newH)
             trajectoryTracker.updateHomography(newH)
+            pinDeckDetector.updateHomography(newH)
             val guides = calibrator.generateProjectedGuides(newH)
 
             _uiState.value = _uiState.value.copy(
                 calibration = calib,
-                projectedGuides = guides
+                projectedGuides = guides,
+                zoomRatio = result.optimalZoomRatio
             )
 
             viewModelScope.launch {
@@ -193,6 +229,13 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             return true
         }
         return false
+    }
+
+    /**
+     * Adjusts the camera hardware zoom ratio.
+     */
+    fun setZoomRatio(zoomRatio: Float) {
+        _uiState.value = _uiState.value.copy(zoomRatio = zoomRatio.coerceIn(1.0f, 5.0f))
     }
 
     /**
@@ -224,6 +267,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         homography = newH
         opticalBallDetector.updateHomography(newH)
         trajectoryTracker.updateHomography(newH)
+        pinDeckDetector.updateHomography(newH)
         val guides = calibrator.generateProjectedGuides(newH)
 
         _uiState.value = _uiState.value.copy(

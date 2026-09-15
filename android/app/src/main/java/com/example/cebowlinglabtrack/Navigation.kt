@@ -106,6 +106,7 @@ fun MainNavigation(
                         },
                         onArmNextShot = { viewModel.armForNextShot() },
                         onNavigateCalibration = { currentTab = BowlingScreenTab.CALIBRATE },
+                        onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
                         onSimulateShot = { preset -> viewModel.simulateShot(preset) }
                     )
                 }

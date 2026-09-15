@@ -23,7 +23,8 @@ class AutoLaneDetector(
         val foulLineLeft: Point2D,
         val foulLineRight: Point2D,
         val arrowsLeft: Point2D,
-        val arrowsRight: Point2D
+        val arrowsRight: Point2D,
+        val optimalZoomRatio: Float = 1.0f
     )
 
     /**
@@ -66,6 +67,14 @@ class AutoLaneDetector(
         val isValidGeometry = (foulWidth > 0.3 * w) && (arrowWidth > 0.15 * w) && (foulWidth > arrowWidth)
         val confidence = if (foulEdges != null && arrowEdges != null && isValidGeometry) 0.92 else 0.60
 
+        // Compute optimal optical zoom ratio to fill ~82% of viewport with lane
+        val laneCoverage = foulWidth / w
+        val optimalZoom = if (isValidGeometry && laneCoverage in 0.15..0.95) {
+            (0.82 / laneCoverage).toFloat().coerceIn(1.0f, 3.5f)
+        } else {
+            1.0f
+        }
+
         val finalFlL = if (isValidGeometry) flL else defaultFlL
         val finalFlR = if (isValidGeometry) flR else defaultFlR
         val finalAlL = if (isValidGeometry) alL else defaultAlL
@@ -85,7 +94,8 @@ class AutoLaneDetector(
             foulLineLeft = finalFlL,
             foulLineRight = finalFlR,
             arrowsLeft = finalAlL,
-            arrowsRight = finalAlR
+            arrowsRight = finalAlR,
+            optimalZoomRatio = optimalZoom
         )
     }
 
