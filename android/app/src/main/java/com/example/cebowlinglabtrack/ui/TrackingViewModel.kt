@@ -338,9 +338,10 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         imageBytes: ByteArray,
         width: Int,
         height: Int,
-        stride: Int = width
+        stride: Int = width,
+        alignment: Handedness? = null
     ): Boolean {
-        val result = autoDetectLaneDetailed(imageBytes, width, height, stride)
+        val result = autoDetectLaneDetailed(imageBytes, width, height, stride, alignment)
         return result.isSuccess
     }
 
@@ -352,11 +353,20 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         imageBytes: ByteArray,
         width: Int,
         height: Int,
-        stride: Int = width
+        stride: Int = width,
+        alignment: Handedness? = null
     ): AutoLaneDetector.AutoDetectionResult {
         updateViewportSize(width.toFloat(), height.toFloat())
         val currentZoom = _uiState.value.zoomRatio
-        val result = autoLaneDetector.detectLaneFromFrame(imageBytes, width, height, stride, currentZoom)
+        val effectiveAlignment = alignment ?: (_uiState.value.activeBowler?.handedness ?: Handedness.RIGHT)
+        val result = autoLaneDetector.detectLaneFromFrame(
+            imageBytes = imageBytes,
+            width = width,
+            height = height,
+            stride = stride,
+            zoomRatio = currentZoom,
+            alignment = effectiveAlignment
+        )
 
         if (result.isSuccess) {
             val calib = result.calibration
@@ -400,27 +410,29 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
      * Attempts 1-tap auto-calibration from the most recently captured live camera frame.
      * If no live camera frame is present, returns false.
      */
-    fun autoCalibrateLatestFrame(): Boolean {
+    fun autoCalibrateLatestFrame(alignment: Handedness? = null): Boolean {
         val bytes = latestFrame ?: return false
         val w = latestWidth
         val h = latestHeight
         val s = if (latestStride > 0) latestStride else w
         if (w <= 0 || h <= 0) return false
-        return autoCalibrateFromFrame(bytes, w, h, s)
+        return autoCalibrateFromFrame(bytes, w, h, s, alignment)
     }
 
     /**
      * Arms the tracker using standard USBC physical lane dimensions preset for the active zoom.
      */
     fun calibrateWithDefaults(
-        anchorMode: com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode = com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode.GUTTERS_AT_ARROWS
+        anchorMode: com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode = com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode.GUTTERS_AT_ARROWS,
+        alignment: Handedness = _uiState.value.activeBowler?.handedness ?: Handedness.RIGHT
     ) {
         val currentZoom = _uiState.value.zoomRatio
         val (defaultCalib, newH) = calibrator.createDefaultCalibration(
             viewWidth = viewportWidth,
             viewHeight = viewportHeight,
             zoomRatio = currentZoom,
-            anchorMode = anchorMode
+            anchorMode = anchorMode,
+            alignment = alignment
         )
         baseHomography = newH
         baseCalibrationZoom = currentZoom

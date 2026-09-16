@@ -59,6 +59,7 @@ import com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode
 import com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix
 import com.example.cebowlinglabtrack.domain.calibration.LaneCalibrator
 import com.example.cebowlinglabtrack.domain.ml.PinDeckDetector
+import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.Point2D
 import com.example.cebowlinglabtrack.theme.DarkBackground
@@ -82,22 +83,25 @@ import kotlin.math.sqrt
 /**
  * Interactive 4-Point Camera Perspective Calibration Screen with Live Camera Viewfinder,
  * Direct In-Viewport Zoom Synchronization, Gutter Anchor Geometry, Real-time 10-Pin Verification,
- * and Precision D-Pad Nudge Controls.
+ * Gutter-Aligned Viewing Angle Selection (Righty vs Lefty), and Precision D-Pad Nudge Controls.
  */
 @Composable
 fun CalibrationScreen(
     currentCalibration: LaneCalibration?,
     zoomRatio: Float = 1.0f,
     autoCenterGuidance: String? = null,
+    bowlerHandedness: Handedness = Handedness.RIGHT,
     onZoomChange: (Float) -> Unit = {},
     onSaveCalibration: (Point2D, Point2D, Point2D, Point2D, CalibrationAnchorMode) -> Unit,
-    onAutoDetectLaneDetailed: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int) -> AutoLaneDetector.AutoDetectionResult)? = null,
-    onAutoDetectLane: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int) -> Boolean)? = null,
-    onCalibrateDefault: (() -> Unit)? = null,
+    onAutoDetectLaneDetailed: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, alignment: Handedness) -> AutoLaneDetector.AutoDetectionResult)? = null,
+    onAutoDetectLane: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, alignment: Handedness) -> Boolean)? = null,
+    onCalibrateDefault: ((alignment: Handedness) -> Unit)? = null,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val calibrator = remember { LaneCalibrator() }
+    var alignmentHandedness by remember { mutableStateOf(bowlerHandedness) }
+    LaunchedEffect(bowlerHandedness) { alignmentHandedness = bowlerHandedness }
     var currentGuidance by remember { mutableStateOf(autoCenterGuidance) }
     LaunchedEffect(autoCenterGuidance) { currentGuidance = autoCenterGuidance }
 
@@ -131,6 +135,8 @@ fun CalibrationScreen(
     var frameWidth by remember { mutableStateOf(0) }
     var frameHeight by remember { mutableStateOf(0) }
     var frameStride by remember { mutableStateOf(0) }
+    var lastViewportWidth by remember { mutableStateOf(1080f) }
+    var lastViewportHeight by remember { mutableStateOf(1920f) }
 
     Column(
         modifier = modifier
@@ -284,6 +290,56 @@ fun CalibrationScreen(
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        // Gutter Alignment Viewing Angle Selector (Aligned with Right Gutter for Righty, Left Gutter for Lefty)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                Handedness.RIGHT to "🎳 RIGHT GUTTER (Righty)",
+                Handedness.LEFT to "🎳 LEFT GUTTER (Lefty)"
+            ).forEach { (hand, label) ->
+                val isSelected = alignmentHandedness == hand
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) UsbcNavyLight else DarkSurface)
+                        .border(1.dp, if (isSelected) UsbcGold else DarkCardBorder, RoundedCornerShape(8.dp))
+                        .clickable {
+                            alignmentHandedness = hand
+                            val (defaultCalib, _) = calibrator.createDefaultCalibration(
+                                viewWidth = lastViewportWidth,
+                                viewHeight = lastViewportHeight,
+                                zoomRatio = zoomRatio,
+                                anchorMode = anchorMode,
+                                alignment = hand
+                            )
+                            flX = defaultCalib.foulLineLeftScreen.x.toFloat()
+                            flY = defaultCalib.foulLineLeftScreen.y.toFloat()
+                            frX = defaultCalib.foulLineRightScreen.x.toFloat()
+                            frY = defaultCalib.foulLineRightScreen.y.toFloat()
+                            alX = defaultCalib.arrowsLeftScreen.x.toFloat()
+                            alY = defaultCalib.arrowsLeftScreen.y.toFloat()
+                            arX = defaultCalib.arrowsRightScreen.x.toFloat()
+                            arY = defaultCalib.arrowsRightScreen.y.toFloat()
+                            autoDetectionStatus = "VIEW ALIGNED WITH ${if (hand == Handedness.RIGHT) "RIGHT" else "LEFT"} GUTTER"
+                        }
+                        .padding(vertical = 5.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        color = if (isSelected) UsbcGold else TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
         // Interactive Calibration Viewport with Live Camera Background
         BoxWithConstraints(
             modifier = Modifier
@@ -294,6 +350,10 @@ fun CalibrationScreen(
         ) {
             val viewWidth = constraints.maxWidth.toFloat()
             val viewHeight = constraints.maxHeight.toFloat()
+            if (viewWidth > 50f && viewHeight > 50f) {
+                lastViewportWidth = viewWidth
+                lastViewportHeight = viewHeight
+            }
 
             // Initialize default anchors to actual viewport constraints if uncalibrated or off-screen
             var sizeInitialized by remember { mutableStateOf(false) }
@@ -302,7 +362,7 @@ fun CalibrationScreen(
                     val isOffScreen = flY < 100f || flY > viewHeight * 1.2f || frX > viewWidth * 1.2f
                     val isUncalibrated = currentCalibration == null || isOffScreen
                     if (isUncalibrated) {
-                        val (defaultCalib, _) = calibrator.createDefaultCalibration(viewWidth, viewHeight, zoomRatio, anchorMode)
+                        val (defaultCalib, _) = calibrator.createDefaultCalibration(viewWidth, viewHeight, zoomRatio, anchorMode, alignment = alignmentHandedness)
                         flX = defaultCalib.foulLineLeftScreen.x.toFloat()
                         flY = defaultCalib.foulLineLeftScreen.y.toFloat()
                         frX = defaultCalib.foulLineRightScreen.x.toFloat()
@@ -409,12 +469,32 @@ fun CalibrationScreen(
                     // Draw connecting quadrilateral (Lane boundaries)
                     // Foul Line (Bottom)
                     drawLine(NeonCyan, Offset(flX, flY), Offset(frX, frY), 4f)
-                    // Left Gutter
-                    drawLine(NeonCyan, Offset(flX, flY), Offset(alX, alY), 3f)
-                    // Right Gutter
-                    drawLine(NeonCyan, Offset(frX, frY), Offset(arX, arY), 3f)
+                    // Left Gutter (highlighted in UsbcGold if Left Gutter aligned)
+                    drawLine(
+                        color = if (alignmentHandedness == Handedness.LEFT) UsbcGold else NeonCyan,
+                        start = Offset(flX, flY),
+                        end = Offset(alX, alY),
+                        strokeWidth = if (alignmentHandedness == Handedness.LEFT) 5f else 3f
+                    )
+                    // Right Gutter (highlighted in UsbcGold if Right Gutter aligned)
+                    drawLine(
+                        color = if (alignmentHandedness == Handedness.RIGHT) UsbcGold else NeonCyan,
+                        start = Offset(frX, frY),
+                        end = Offset(arX, arY),
+                        strokeWidth = if (alignmentHandedness == Handedness.RIGHT) 5f else 3f
+                    )
                     // Top Boundary (Arrows or Pin Deck)
                     drawLine(ElectricAmber, Offset(alX, alY), Offset(arX, arY), 3f)
+
+                    // AR Laser Alignment Reference Guide for target gutter
+                    val laserX = if (alignmentHandedness == Handedness.RIGHT) size.width * 0.78f else size.width * 0.22f
+                    drawLine(
+                        color = UsbcGold.copy(alpha = 0.45f),
+                        start = Offset(laserX, 0f),
+                        end = Offset(laserX, size.height),
+                        strokeWidth = 2f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                    )
 
                     // Draw center guide line
                     val midFoul = Offset((flX + frX) / 2f, (flY + frY) / 2f)
@@ -427,23 +507,23 @@ fun CalibrationScreen(
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 10f), 0f)
                     )
 
-                    // Labels for top anchors based on mode
+                    // Labels for top anchors based on mode and alignment
                     val topLabelL = when (anchorMode) {
-                        CalibrationAnchorMode.GUTTERS_AT_ARROWS -> "3. LEFT GUTTER (15FT)"
+                        CalibrationAnchorMode.GUTTERS_AT_ARROWS -> if (alignmentHandedness == Handedness.LEFT) "3. LEFT GUTTER (ALIGN)" else "3. LEFT GUTTER (15FT)"
                         CalibrationAnchorMode.ARROW_MARKERS -> "3. ARROW L (B5)"
                         CalibrationAnchorMode.PIN_DECK -> "3. LEFT DECK (60FT)"
                     }
                     val topLabelR = when (anchorMode) {
-                        CalibrationAnchorMode.GUTTERS_AT_ARROWS -> "4. RIGHT GUTTER (15FT)"
+                        CalibrationAnchorMode.GUTTERS_AT_ARROWS -> if (alignmentHandedness == Handedness.RIGHT) "4. RIGHT GUTTER (ALIGN)" else "4. RIGHT GUTTER (15FT)"
                         CalibrationAnchorMode.ARROW_MARKERS -> "4. ARROW R (B35)"
                         CalibrationAnchorMode.PIN_DECK -> "4. RIGHT DECK (60FT)"
                     }
 
-                    // Draw 4 Anchor Handles
-                    drawPinHandle("1. FOUL L (B1)", Offset(flX, flY), NeonStrikeGreen, selectedPinIndex == 0)
-                    drawPinHandle("2. FOUL R (B39)", Offset(frX, frY), NeonStrikeGreen, selectedPinIndex == 1)
-                    drawPinHandle(topLabelL, Offset(alX, alY), ElectricAmber, selectedPinIndex == 2)
-                    drawPinHandle(topLabelR, Offset(arX, arY), ElectricAmber, selectedPinIndex == 3)
+                    // Draw 4 Anchor Handles (Gutter-aligned handles highlighted in UsbcGold)
+                    drawPinHandle("1. FOUL L (B1)", Offset(flX, flY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 0)
+                    drawPinHandle("2. FOUL R (B39)", Offset(frX, frY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 1)
+                    drawPinHandle(topLabelL, Offset(alX, alY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else ElectricAmber, selectedPinIndex == 2)
+                    drawPinHandle(topLabelR, Offset(arX, arY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else ElectricAmber, selectedPinIndex == 3)
                 }
             }
 
@@ -639,7 +719,7 @@ fun CalibrationScreen(
                     val frame = latestFrameBytes
                     if (frame != null) {
                         if (onAutoDetectLaneDetailed != null) {
-                            val res = onAutoDetectLaneDetailed(frame, frameWidth, frameHeight, frameStride)
+                            val res = onAutoDetectLaneDetailed(frame, frameWidth, frameHeight, frameStride, alignmentHandedness)
                             autoDetectionStatus = res.statusMessage
                             currentGuidance = res.autoCenterGuidance
                             if (res.isSuccess) {
@@ -656,7 +736,7 @@ fun CalibrationScreen(
                                 }
                             }
                         } else if (onAutoDetectLane != null) {
-                            val success = onAutoDetectLane(frame, frameWidth, frameHeight, frameStride)
+                            val success = onAutoDetectLane(frame, frameWidth, frameHeight, frameStride, alignmentHandedness)
                             if (success) {
                                 currentCalibration?.let {
                                     flX = it.foulLineLeftScreen.x.toFloat()
@@ -701,7 +781,13 @@ fun CalibrationScreen(
             // 1-Click USBC Standard Preset Button
             Button(
                 onClick = {
-                    val defaultPair = calibrator.createDefaultCalibration(viewWidth = 1080f, viewHeight = 1920f, zoomRatio = zoomRatio, anchorMode = anchorMode)
+                    val defaultPair = calibrator.createDefaultCalibration(
+                        viewWidth = lastViewportWidth,
+                        viewHeight = lastViewportHeight,
+                        zoomRatio = zoomRatio,
+                        anchorMode = anchorMode,
+                        alignment = alignmentHandedness
+                    )
                     val defaultCal = defaultPair.first
                     flX = defaultCal.foulLineLeftScreen.x.toFloat()
                     flY = defaultCal.foulLineLeftScreen.y.toFloat()
@@ -711,8 +797,8 @@ fun CalibrationScreen(
                     alY = defaultCal.arrowsLeftScreen.y.toFloat()
                     arX = defaultCal.arrowsRightScreen.x.toFloat()
                     arY = defaultCal.arrowsRightScreen.y.toFloat()
-                    onCalibrateDefault?.invoke()
-                    autoDetectionStatus = "✓ USBC PRESET APPLIED (${String.format("%.1f", zoomRatio)}x)"
+                    onCalibrateDefault?.invoke(alignmentHandedness)
+                    autoDetectionStatus = "✓ ${if (alignmentHandedness == Handedness.RIGHT) "RIGHT" else "LEFT"} GUTTER PRESET (${String.format("%.1f", zoomRatio)}x)"
                 },
                 modifier = Modifier
                     .weight(1f)

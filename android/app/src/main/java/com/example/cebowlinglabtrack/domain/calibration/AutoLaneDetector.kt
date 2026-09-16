@@ -1,5 +1,6 @@
 package com.example.cebowlinglabtrack.domain.calibration
 
+import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.Point2D
 import kotlin.math.abs
@@ -43,16 +44,18 @@ class AutoLaneDetector(
         width: Int,
         height: Int,
         stride: Int = width,
-        zoomRatio: Float = 1.0f
+        zoomRatio: Float = 1.0f,
+        alignment: Handedness = Handedness.RIGHT
     ): AutoDetectionResult {
         // Run full hierarchical autonomous recognition (Pins -> Gutters -> Foul Line -> Arrows)
-        val recognition = laneRecognizer.recognizeLane(imageBytes, width, height, stride, zoomRatio)
+        val recognition = laneRecognizer.recognizeLane(imageBytes, width, height, stride, zoomRatio, alignment)
 
         val defaultCalibPair = calibrator.createDefaultCalibration(
             viewWidth = width.toFloat(),
             viewHeight = height.toFloat(),
             zoomRatio = zoomRatio,
-            anchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS
+            anchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS,
+            alignment = alignment
         )
         val defaultCalib = defaultCalibPair.first
 

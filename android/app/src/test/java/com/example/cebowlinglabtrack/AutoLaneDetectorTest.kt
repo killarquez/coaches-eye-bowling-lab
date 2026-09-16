@@ -38,9 +38,10 @@ class AutoLaneDetectorTest {
         val width = 800
         val height = 1200
         val stride = width
-        val imageBytes = createSyntheticLaneFrame(width, height, pinRackCenterX = 400.0, includePins = true)
+        // Target rack center for right gutter alignment is 55% of width (440px)
+        val imageBytes = createSyntheticLaneFrame(width, height, pinRackCenterX = 440.0, includePins = true)
 
-        val result = detector.detectLaneFromFrame(imageBytes, width, height, stride)
+        val result = detector.detectLaneFromFrame(imageBytes, width, height, stride, alignment = com.example.cebowlinglabtrack.domain.model.Handedness.RIGHT)
 
         assertNotNull("Detection result should not be null", result)
         assertTrue("Detection should succeed on lane with full pin rack", result.isSuccess)
@@ -53,11 +54,17 @@ class AutoLaneDetectorTest {
         val arrowWidth = result.arrowsRight.x - result.arrowsLeft.x
         assertTrue("Foul line must be wider than arrows due to perspective", foulWidth > arrowWidth)
 
-        // Check auto-center guidance
-        assertEquals("🟢 LANE CENTERED", result.autoCenterGuidance)
+        // Check right-gutter alignment guidance
+        assertEquals("🟢 RIGHT GUTTER ALIGNED", result.autoCenterGuidance)
 
         // Check that homography matrix elements are valid 3x3
         assertEquals(9, result.calibration.homographyMatrixElements.size)
+
+        // Also verify Left-Gutter alignment: target rack center is 45% of width (360px)
+        val imageBytesLeft = createSyntheticLaneFrame(width, height, pinRackCenterX = 360.0, includePins = true)
+        val resultLeft = detector.detectLaneFromFrame(imageBytesLeft, width, height, stride, alignment = com.example.cebowlinglabtrack.domain.model.Handedness.LEFT)
+        assertTrue("Left gutter alignment should succeed", resultLeft.isSuccess)
+        assertEquals("🟢 LEFT GUTTER ALIGNED", resultLeft.autoCenterGuidance)
 
         // Verify that forward-projected 15-ft arrows map back to physical 15.0 ft
         val homography = com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix(
@@ -180,6 +187,13 @@ class AutoLaneDetectorTest {
         val width1x = calib1x.foulLineRightScreen.x - calib1x.foulLineLeftScreen.x
         val width25x = calib25x.foulLineRightScreen.x - calib25x.foulLineLeftScreen.x
         assertTrue("Lane width at foul line should be wider when zoomed in", width25x > width1x)
+
+        // Also test Left Gutter alignment default calibration at zoom
+        val pairLeft1x = calibrator.createDefaultCalibration(1080f, 1920f, zoomRatio = 1.0f, alignment = com.example.cebowlinglabtrack.domain.model.Handedness.LEFT)
+        val pairLeft25x = calibrator.createDefaultCalibration(1080f, 1920f, zoomRatio = 2.5f, alignment = com.example.cebowlinglabtrack.domain.model.Handedness.LEFT)
+        val wLeft1x = pairLeft1x.first.foulLineRightScreen.x - pairLeft1x.first.foulLineLeftScreen.x
+        val wLeft25x = pairLeft25x.first.foulLineRightScreen.x - pairLeft25x.first.foulLineLeftScreen.x
+        assertTrue("Left-gutter lane width at foul line should be wider when zoomed in", wLeft25x > wLeft1x)
     }
 
     @Test

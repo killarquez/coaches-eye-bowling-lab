@@ -1,5 +1,6 @@
 package com.example.cebowlinglabtrack.domain.calibration
 
+import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.LaneConstants
 import com.example.cebowlinglabtrack.domain.model.Point2D
@@ -65,18 +66,24 @@ class AutonomousLaneRecognizer(
     /**
      * Executes the full hierarchical lane recognition pipeline.
      */
+    /**
+     * Executes the full hierarchical lane recognition pipeline.
+     */
     fun recognizeLane(
         imageBytes: ByteArray,
         width: Int,
         height: Int,
         stride: Int = width,
-        zoomRatio: Float = 1.0f
+        zoomRatio: Float = 1.0f,
+        alignment: Handedness = Handedness.RIGHT
     ): LaneRecognitionResult {
         val w = width.toDouble()
         val h = height.toDouble()
 
+        val gutterName = if (alignment == Handedness.RIGHT) "RIGHT" else "LEFT"
+
         // 1. Stage 1: Detect Full 10-Pin Rack (Primary Environmental Anchor)
-        val pinRack = detectPinRack(imageBytes, width, height, stride, zoomRatio)
+        val pinRack = detectPinRack(imageBytes, width, height, stride, zoomRatio, alignment)
         if (pinRack == null || pinRack.confidence < 0.45) {
             return LaneRecognitionResult(
                 isSuccess = false,
@@ -91,28 +98,28 @@ class AutonomousLaneRecognizer(
                 foulLineRight = null,
                 arrowsLeft = null,
                 arrowsRight = null,
-                autoCenterGuidance = "AIM CAMERA DOWN THE LANE AT PINS",
+                autoCenterGuidance = "AIM DOWN $gutterName GUTTER AT PINS",
                 optimalZoomRatio = zoomRatio,
                 confidence = 0.0
             )
         }
 
-        // Compute Auto-Center Guidance based on Pin Rack position
-        val viewportCenterX = w / 2.0
-        val centerDelta = pinRack.centerX - viewportCenterX
+        // Compute Gutter-Alignment Guidance based on Pin Rack position
+        val targetRackCenterX = if (alignment == Handedness.RIGHT) w * 0.55 else w * 0.45
+        val centerDelta = pinRack.centerX - targetRackCenterX
         val centerDeltaPct = centerDelta / w
         val autoCenterGuidance = when {
-            centerDeltaPct > 0.04 -> "⚡ PAN RIGHT ${(centerDeltaPct * 40.0).roundToInt().coerceAtLeast(1)}° TO CENTER"
-            centerDeltaPct < -0.04 -> "⚡ PAN LEFT ${(abs(centerDeltaPct) * 40.0).roundToInt().coerceAtLeast(1)}° TO CENTER"
-            else -> "🟢 LANE CENTERED"
+            centerDeltaPct > 0.045 -> "⚡ PAN RIGHT ${(centerDeltaPct * 40.0).roundToInt().coerceAtLeast(1)}° TO ALIGN $gutterName GUTTER"
+            centerDeltaPct < -0.045 -> "⚡ PAN LEFT ${(abs(centerDeltaPct) * 40.0).roundToInt().coerceAtLeast(1)}° TO ALIGN $gutterName GUTTER"
+            else -> "🟢 $gutterName GUTTER ALIGNED"
         }
 
         // 2. Stage 2: Trace Gutter Boundaries from Pins Downwards
-        val gutters = traceGuttersFromPins(imageBytes, pinRack, width, height, stride, zoomRatio)
+        val gutters = traceGuttersFromPins(imageBytes, pinRack, width, height, stride, zoomRatio, alignment)
         if (gutters == null || gutters.confidence < 0.50) {
             return LaneRecognitionResult(
                 isSuccess = false,
-                statusMessage = "PINS DETECTED • ALIGN GUTTERS IN VIEW",
+                statusMessage = "PINS DETECTED • ALIGN $gutterName GUTTER IN VIEW",
                 pinRackDetected = true,
                 guttersDetected = false,
                 foulLineDetected = false,
@@ -260,7 +267,8 @@ class AutonomousLaneRecognizer(
         width: Int,
         height: Int,
         stride: Int = width,
-        zoomRatio: Float = 1.0f
+        zoomRatio: Float = 1.0f,
+        alignment: Handedness = Handedness.RIGHT
     ): PinRackCandidate? {
         val w = width.toDouble()
         val h = height.toDouble()
@@ -340,10 +348,11 @@ class AutonomousLaneRecognizer(
 
                             if (contrast > 0.25 && segmentPeakCount >= 2) {
                                 val centerX = segmentStartX + segmentWidth / 2.0
-                                val centerOffsetRatio = abs(centerX - w / 2.0) / (w / 2.0)
+                                val targetRackCenterX = if (alignment == Handedness.RIGHT) w * 0.55 else w * 0.45
+                                val offsetRatio = abs(centerX - targetRackCenterX) / (w / 2.0)
                                 val confidence = ((contrast * 0.5) + (min(segmentPeakCount, 5) / 5.0 * 0.5)).coerceIn(0.0, 1.0)
-                                // Prioritize candidate closest to the optical center (target lane)
-                                val score = confidence * (1.0 - 0.6 * centerOffsetRatio)
+                                // Prioritize candidate matching target gutter alignment
+                                val score = confidence * (1.0 - 0.5 * offsetRatio)
 
                                 if (score > maxScore) {
                                     maxScore = score
@@ -376,7 +385,8 @@ class AutonomousLaneRecognizer(
         width: Int,
         height: Int,
         stride: Int,
-        zoomRatio: Float
+        zoomRatio: Float,
+        alignment: Handedness = Handedness.RIGHT
     ): GutterBoundaryLines? {
         val w = width.toDouble()
         val h = height.toDouble()
@@ -400,11 +410,25 @@ class AutonomousLaneRecognizer(
         for (y in startY..endY step stepY) {
             val rowOffset = y * stride
 
-            // Expected lane expansion from pin deck center
             val progress = (y - startY).toDouble() / (endY - startY)
-            val expansion = (progress * progress.coerceAtLeast(0.7)) * (pinRack.widthPx * (if (zoomRatio >= 2.0f) 1.6 else 2.6))
-            val expectedLeftX = seedLeftX - expansion
-            val expectedRightX = seedRightX + expansion
+            val quadProgress = progress * progress.coerceAtLeast(0.7)
+
+            // Asymmetric perspective expansion based on gutter camera alignment:
+            // The camera is aligned with the anchor gutter (Right for righty, Left for lefty),
+            // which runs almost vertically down the frame with minimal drift.
+            // The opposite gutter diverges heavily across the screen.
+            val (leftExpansion, rightExpansion) = when (alignment) {
+                Handedness.RIGHT -> Pair(
+                    quadProgress * (pinRack.widthPx * (if (zoomRatio >= 2.0f) 2.0 else 3.0)),
+                    progress * (pinRack.widthPx * 0.8)
+                )
+                Handedness.LEFT -> Pair(
+                    progress * (pinRack.widthPx * 0.8),
+                    quadProgress * (pinRack.widthPx * (if (zoomRatio >= 2.0f) 2.0 else 3.0))
+                )
+            }
+            val expectedLeftX = seedLeftX - leftExpansion
+            val expectedRightX = seedRightX + rightExpansion
 
             // Search left gutter around expectedLeftX with outward bias
             val leftSearchStart = (expectedLeftX - searchMargin).toInt().coerceIn(0, width - 10)
@@ -456,10 +480,13 @@ class AutonomousLaneRecognizer(
         val (rightSlope, rightIntercept) = fitLine(rightGutterPoints)
 
         // Sanity checks:
-        // Left gutter must slant leftwards (slope <= 0 in image coordinates: larger y gives smaller x)
-        // Right gutter must slant rightwards (slope >= 0 in image coordinates: larger y gives larger x)
-        val validSlopes = (leftSlope <= 0.15) && (rightSlope >= -0.15)
-        val confidence = if (validSlopes) 0.85 else 0.50
+        // When aligned with Right Gutter: Right slope is near 0 (-0.25..0.45), Left slope is negative (<= 0.05)
+        // When aligned with Left Gutter: Left slope is near 0 (-0.45..0.25), Right slope is positive (>= -0.05)
+        val validSlopes = when (alignment) {
+            Handedness.RIGHT -> (leftSlope <= 0.05) && (rightSlope in -0.25..0.45)
+            Handedness.LEFT -> (leftSlope in -0.45..0.25) && (rightSlope >= -0.05)
+        }
+        val confidence = if (validSlopes) 0.88 else 0.52
 
         return GutterBoundaryLines(
             leftSlope = leftSlope,

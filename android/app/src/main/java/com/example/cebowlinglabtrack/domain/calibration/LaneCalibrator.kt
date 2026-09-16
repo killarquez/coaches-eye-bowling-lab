@@ -1,5 +1,6 @@
 package com.example.cebowlinglabtrack.domain.calibration
 
+import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.LaneConstants
 import com.example.cebowlinglabtrack.domain.model.LanePoint
@@ -240,13 +241,15 @@ class LaneCalibrator {
 
     /**
      * Provides default screen anchor coordinates for a standard phone viewfinder
-     * with tripod mounted behind foul line, scaled to the current zoom ratio.
+     * with tripod mounted behind foul line, scaled to the current zoom ratio and
+     * aligned with either the Right Gutter (Righty) or Left Gutter (Lefty).
      */
     fun createDefaultCalibration(
         viewWidth: Float,
         viewHeight: Float,
         zoomRatio: Float = 1.0f,
-        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS,
+        alignment: Handedness = Handedness.RIGHT
     ): Pair<LaneCalibration, HomographyMatrix> {
         // Perspective mapping for standard bowling alley view from approach
         val foulY = if (zoomRatio >= 2.0f) {
@@ -260,14 +263,40 @@ class LaneCalibrator {
             viewHeight * (0.42f + 0.04f * (zoomRatio - 1.0f))
         }
 
-        val foulHalfW = (viewWidth * (0.20f + 0.20f * (zoomRatio - 1.0f).coerceIn(0f, 1.5f))).coerceAtMost(viewWidth * 0.45f)
-        val arrowsHalfW = (viewWidth * (0.12f + 0.14f * (zoomRatio - 1.0f).coerceIn(0f, 1.5f))).coerceAtMost(viewWidth * 0.35f)
-        val midX = viewWidth * 0.5f
-
-        val foulLeft = Point2D((midX - foulHalfW).toDouble(), foulY.toDouble())
-        val foulRight = Point2D((midX + foulHalfW).toDouble(), foulY.toDouble())
-        val arrowsLeft = Point2D((midX - arrowsHalfW).toDouble(), arrowsY.toDouble())
-        val arrowsRight = Point2D((midX + arrowsHalfW).toDouble(), arrowsY.toDouble())
+        val (foulLeft, foulRight, arrowsLeft, arrowsRight) = when (alignment) {
+            Handedness.RIGHT -> {
+                // Camera aligned with RIGHT gutter (board 39):
+                // Right gutter runs almost vertical near the right third
+                // Left gutter diverges outwards to the left toward the foul line
+                val zoomFactor = (zoomRatio - 1.0f).coerceIn(0f, 1.5f)
+                val rFoulX = viewWidth * (0.80f + 0.08f * zoomFactor).coerceAtMost(0.95f)
+                val rArrowsX = viewWidth * (0.73f + 0.04f * zoomFactor).coerceAtMost(0.85f)
+                val lFoulX = viewWidth * (0.16f - 0.08f * zoomFactor).coerceAtLeast(0.05f)
+                val lArrowsX = viewWidth * (0.38f - 0.04f * zoomFactor).coerceAtLeast(0.15f)
+                listOf(
+                    Point2D(lFoulX.toDouble(), foulY.toDouble()),
+                    Point2D(rFoulX.toDouble(), foulY.toDouble()),
+                    Point2D(lArrowsX.toDouble(), arrowsY.toDouble()),
+                    Point2D(rArrowsX.toDouble(), arrowsY.toDouble())
+                )
+            }
+            Handedness.LEFT -> {
+                // Camera aligned with LEFT gutter (board 1):
+                // Left gutter runs almost vertical near the left third
+                // Right gutter diverges outwards to the right toward the foul line
+                val zoomFactor = (zoomRatio - 1.0f).coerceIn(0f, 1.5f)
+                val lFoulX = viewWidth * (0.20f - 0.08f * zoomFactor).coerceAtLeast(0.05f)
+                val lArrowsX = viewWidth * (0.27f - 0.04f * zoomFactor).coerceAtLeast(0.15f)
+                val rFoulX = viewWidth * (0.84f + 0.08f * zoomFactor).coerceAtMost(0.95f)
+                val rArrowsX = viewWidth * (0.62f + 0.04f * zoomFactor).coerceAtMost(0.85f)
+                listOf(
+                    Point2D(lFoulX.toDouble(), foulY.toDouble()),
+                    Point2D(rFoulX.toDouble(), foulY.toDouble()),
+                    Point2D(lArrowsX.toDouble(), arrowsY.toDouble()),
+                    Point2D(rArrowsX.toDouble(), arrowsY.toDouble())
+                )
+            }
+        }
 
         return calibrate(
             foulLineLeft = foulLeft,

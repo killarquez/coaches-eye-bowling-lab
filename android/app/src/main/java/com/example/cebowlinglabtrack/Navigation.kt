@@ -41,7 +41,7 @@ import com.example.cebowlinglabtrack.ui.screens.KinematicsDetailScreen
 import com.example.cebowlinglabtrack.ui.screens.LiveTrackingScreen
 import com.example.cebowlinglabtrack.ui.screens.SessionHistoryScreen
 import com.example.cebowlinglabtrack.ui.screens.TopDownLaneScreen
-
+import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.theme.UsbcGold
 import com.example.cebowlinglabtrack.theme.UsbcNavyLight
 
@@ -153,13 +153,14 @@ fun MainNavigation(
                         currentCalibration = uiState.calibration,
                         zoomRatio = uiState.zoomRatio,
                         autoCenterGuidance = uiState.autoCenterGuidance,
+                        bowlerHandedness = uiState.activeBowler?.handedness ?: Handedness.RIGHT,
                         onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
-                        onCalibrateDefault = { viewModel.calibrateWithDefaults() },
-                        onAutoDetectLaneDetailed = { bytes, w, h, s ->
-                            viewModel.autoDetectLaneDetailed(bytes, w, h, s)
+                        onCalibrateDefault = { alignment -> viewModel.calibrateWithDefaults(alignment = alignment) },
+                        onAutoDetectLaneDetailed = { bytes, w, h, s, alignment ->
+                            viewModel.autoDetectLaneDetailed(bytes, w, h, s, alignment = alignment)
                         },
-                        onAutoDetectLane = { bytes, w, h, s ->
-                            viewModel.autoCalibrateFromFrame(bytes, w, h, s)
+                        onAutoDetectLane = { bytes, w, h, s, alignment ->
+                            viewModel.autoCalibrateFromFrame(bytes, w, h, s, alignment = alignment)
                         },
                         onSaveCalibration = { flL, flR, arL, arR, mode ->
                             viewModel.updateCalibration(flL, flR, arL, arR, mode)
