@@ -136,16 +136,41 @@ class AutonomousLaneRecognizer(
         val foulY = locateFoulLine(imageBytes, gutters, minScanY, maxScanY, width, height, stride)
             ?: (h * if (zoomRatio >= 2.0f) 0.76 else 0.56).toInt()
 
-        // 4. Stage 4: Locate 15-ft Arrows Line via Perspective Foreshortening
+        // 4. Stage 4: Solve 4-point homography (0 ft to 60 ft) and project exact 15-ft arrows
         val pinDeckY = pinRack.bottomY
-        // Projective cross-ratio distance for 15 ft on a 60 ft lane
-        val arrowsY = (foulY - (foulY - pinDeckY) * 0.52).toInt().coerceIn(pinDeckY.toInt() + 10, foulY - 10)
 
-        // Compute 4 Gutter Anchors
+        // Foul Line corners (0.0 ft, Boards 1 & 39)
         val flL = Point2D(gutters.xLeftAt(foulY.toDouble()), foulY.toDouble())
         val flR = Point2D(gutters.xRightAt(foulY.toDouble()), foulY.toDouble())
-        val alL = Point2D(gutters.xLeftAt(arrowsY.toDouble()), arrowsY.toDouble())
-        val arR = Point2D(gutters.xRightAt(arrowsY.toDouble()), arrowsY.toDouble())
+
+        // Pin Deck corners (60.0 ft, Boards 1 & 39)
+        val pinDeckL = Point2D(gutters.xLeftAt(pinDeckY), pinDeckY)
+        val pinDeckR = Point2D(gutters.xRightAt(pinDeckY), pinDeckY)
+
+        // Compute 4-point homography using PIN_DECK mode (0 ft & 60 ft)
+        val deckCalibResult = calibrator.calibrate(
+            foulLineLeft = flL,
+            foulLineRight = flR,
+            arrowsLeft = pinDeckL,
+            arrowsRight = pinDeckR,
+            anchorMode = CalibrationAnchorMode.PIN_DECK,
+            calibrationZoomRatio = zoomRatio
+        )
+        val hDeck = deckCalibResult?.second
+
+        // Derive Arrow Line (15.0 ft) via exact forward homography projection
+        val (alL, arR) = if (hDeck != null) {
+            Pair(
+                hDeck.projectLaneToPixel(board = 1.0, distanceFt = LaneConstants.ARROWS_DISTANCE_FT),
+                hDeck.projectLaneToPixel(board = 39.0, distanceFt = LaneConstants.ARROWS_DISTANCE_FT)
+            )
+        } else {
+            val arrowsY = (foulY - (foulY - pinDeckY) * 0.52).toInt().coerceIn(pinDeckY.toInt() + 10, foulY - 10)
+            Pair(
+                Point2D(gutters.xLeftAt(arrowsY.toDouble()), arrowsY.toDouble()),
+                Point2D(gutters.xRightAt(arrowsY.toDouble()), arrowsY.toDouble())
+            )
+        }
 
         // Sanity check geometry
         val foulW = flR.x - flL.x
@@ -342,6 +367,13 @@ class AutonomousLaneRecognizer(
         val startY = pinRack.bottomY.toInt() + 10
         val endY = (h * (if (zoomRatio >= 2.0f) 0.82 else 0.65)).toInt().coerceIn(startY + 30, height - 1)
 
+        val halfRack = pinRack.widthPx / 2.0
+        // Outward offset prevents clamping to the outer skirt of pins 7 & 10 (boards 2-3 & 37-38)
+        val gutterSeedOffsetPx = (pinRack.widthPx * 0.08).coerceIn(20.0, 40.0)
+
+        val seedLeftX = (pinRack.centerX - halfRack) - gutterSeedOffsetPx
+        val seedRightX = (pinRack.centerX + halfRack) + gutterSeedOffsetPx
+
         val leftGutterPoints = mutableListOf<Point2D>()
         val rightGutterPoints = mutableListOf<Point2D>()
 
@@ -351,11 +383,13 @@ class AutonomousLaneRecognizer(
 
             // Expected lane expansion from pin deck center
             val progress = (y - startY).toDouble() / (endY - startY)
-            val halfWidthEst = (pinRack.widthPx * 0.5) + progress * (pinRack.widthPx * (if (zoomRatio >= 2.0f) 1.2 else 2.2))
+            val expansion = progress * (pinRack.widthPx * (if (zoomRatio >= 2.0f) 1.2 else 2.2))
+            val expectedLeftX = seedLeftX - expansion
+            val expectedRightX = seedRightX + expansion
 
-            // Search left gutter
-            val leftSearchStart = (pinRack.centerX - halfWidthEst * 1.8).toInt().coerceIn(0, width - 10)
-            val leftSearchEnd = (pinRack.centerX - halfWidthEst * 0.4).toInt().coerceIn(leftSearchStart + 5, width - 1)
+            // Search left gutter around expectedLeftX with outward bias
+            val leftSearchStart = (expectedLeftX - gutterSeedOffsetPx * 1.5).toInt().coerceIn(0, width - 10)
+            val leftSearchEnd = (expectedLeftX + gutterSeedOffsetPx * 0.8).toInt().coerceIn(leftSearchStart + 5, width - 1)
 
             var bestLeftGrad = 0
             var bestLeftX = -1
@@ -374,9 +408,9 @@ class AutonomousLaneRecognizer(
                 leftGutterPoints.add(Point2D(bestLeftX.toDouble(), y.toDouble()))
             }
 
-            // Search right gutter
-            val rightSearchStart = (pinRack.centerX + halfWidthEst * 0.4).toInt().coerceIn(0, width - 10)
-            val rightSearchEnd = (pinRack.centerX + halfWidthEst * 1.8).toInt().coerceIn(rightSearchStart + 5, width - 1)
+            // Search right gutter around expectedRightX with outward bias
+            val rightSearchStart = (expectedRightX - gutterSeedOffsetPx * 0.8).toInt().coerceIn(0, width - 10)
+            val rightSearchEnd = (expectedRightX + gutterSeedOffsetPx * 1.5).toInt().coerceIn(rightSearchStart + 5, width - 1)
 
             var bestRightGrad = 0
             var bestRightX = -1

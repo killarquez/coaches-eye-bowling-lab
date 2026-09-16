@@ -58,6 +58,21 @@ class AutoLaneDetectorTest {
 
         // Check that homography matrix elements are valid 3x3
         assertEquals(9, result.calibration.homographyMatrixElements.size)
+
+        // Verify that forward-projected 15-ft arrows map back to physical 15.0 ft
+        val homography = com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix(
+            result.calibration.homographyMatrixElements.toDoubleArray()
+        )
+        val invArrowL = homography.inverse(result.arrowsLeft)
+        val invArrowR = homography.inverse(result.arrowsRight)
+        org.junit.Assert.assertEquals(15.0, invArrowL.distanceFt, 0.2)
+        org.junit.Assert.assertEquals(15.0, invArrowR.distanceFt, 0.2)
+
+        // Verify projectLaneToPixel round-trip for center arrow (Board 20, 15 ft)
+        val centerArrowPixel = homography.projectLaneToPixel(20.0, 15.0)
+        val invCenter = homography.inverse(centerArrowPixel)
+        org.junit.Assert.assertEquals(20.0, invCenter.board, 0.05)
+        org.junit.Assert.assertEquals(15.0, invCenter.distanceFt, 0.05)
     }
 
     @Test

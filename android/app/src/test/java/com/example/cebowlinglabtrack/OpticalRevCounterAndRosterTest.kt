@@ -149,4 +149,122 @@ class OpticalRevCounterAndRosterTest {
         assertEquals("1-Handed (No Thumb)", BowlingStyle.ONE_HANDED_NO_THUMB.displayName())
         assertEquals("2-Handed", BowlingStyle.TWO_HANDED.displayName())
     }
+
+    @Test
+    fun testAdaptiveThresholdDarkBallInDimAlley() {
+        // In dim bowling alley lighting, tape may only reach luminance 150 (below legacy static 180)
+        val counter = OpticalRevCounter(contrastThreshold = 180, targetFps = 120.0, useAdaptiveThreshold = true)
+        counter.reset()
+
+        val width = 200
+        val height = 200
+        val stride = width
+        val ballCenter = Point2D(100.0, 100.0)
+        val ballRadius = 25
+
+        val targetRpm = 420.0
+        val revsPerSec = targetRpm / 60.0
+        val angularVelocityRadPerSec = revsPerSec * 2.0 * PI
+        val dtMs = 8L
+
+        for (frame in 0 until 40) {
+            val frameTimeMs = frame * dtMs
+            val currentAngle = (frameTimeMs / 1000.0) * angularVelocityRadPerSec
+
+            // Dark ball surface: luminance 35
+            val buffer = ByteArray(width * height) { 35.toByte() }
+
+            // Dim tape highlight: luminance 150
+            val tapeLength = 15
+            for (dist in 4..tapeLength) {
+                val px = (ballCenter.x + dist * cos(currentAngle)).toInt()
+                val py = (ballCenter.y + dist * sin(currentAngle)).toInt()
+                if (px in 0 until width && py in 0 until height) {
+                    buffer[py * stride + px] = 150.toByte()
+                    for (dy in -1..1) {
+                        for (dx in -1..1) {
+                            val nx = px + dx
+                            val ny = py + dy
+                            if (nx in 0 until width && ny in 0 until height) {
+                                buffer[ny * stride + nx] = 140.toByte()
+                            }
+                        }
+                    }
+                }
+            }
+
+            counter.processFrame(
+                imageBytes = buffer,
+                width = width,
+                height = height,
+                stride = stride,
+                ballCenter = ballCenter,
+                ballRadiusPx = ballRadius,
+                timestampMs = frameTimeMs
+            )
+        }
+
+        val result = counter.evaluateShotRevRate(shotDurationMs = 1800L, fallbackRpm = 400)
+        assertTrue("Adaptive threshold must detect tape on dark ball in dim lighting", result.isDetected)
+        assertTrue("RPM should be measured near 420 (actual: ${result.opticalRpm})", result.opticalRpm in 340..520)
+    }
+
+    @Test
+    fun testAdaptiveThresholdPearlBall() {
+        // Bright pearl ball has background luminance ~185 (which would swamp a static 180 threshold)
+        val counter = OpticalRevCounter(contrastThreshold = 180, targetFps = 120.0, useAdaptiveThreshold = true)
+        counter.reset()
+
+        val width = 200
+        val height = 200
+        val stride = width
+        val ballCenter = Point2D(100.0, 100.0)
+        val ballRadius = 25
+
+        val targetRpm = 480.0
+        val revsPerSec = targetRpm / 60.0
+        val angularVelocityRadPerSec = revsPerSec * 2.0 * PI
+        val dtMs = 8L
+
+        for (frame in 0 until 40) {
+            val frameTimeMs = frame * dtMs
+            val currentAngle = (frameTimeMs / 1000.0) * angularVelocityRadPerSec
+
+            // Pearl ball background: luminance 185
+            val buffer = ByteArray(width * height) { 185.toByte() }
+
+            // Bright white tape: luminance 250
+            val tapeLength = 15
+            for (dist in 4..tapeLength) {
+                val px = (ballCenter.x + dist * cos(currentAngle)).toInt()
+                val py = (ballCenter.y + dist * sin(currentAngle)).toInt()
+                if (px in 0 until width && py in 0 until height) {
+                    buffer[py * stride + px] = 250.toByte()
+                    for (dy in -1..1) {
+                        for (dx in -1..1) {
+                            val nx = px + dx
+                            val ny = py + dy
+                            if (nx in 0 until width && ny in 0 until height) {
+                                buffer[ny * stride + nx] = 245.toByte()
+                            }
+                        }
+                    }
+                }
+            }
+
+            counter.processFrame(
+                imageBytes = buffer,
+                width = width,
+                height = height,
+                stride = stride,
+                ballCenter = ballCenter,
+                ballRadiusPx = ballRadius,
+                timestampMs = frameTimeMs
+            )
+        }
+
+        val result = counter.evaluateShotRevRate(shotDurationMs = 1800L, fallbackRpm = 400)
+        assertTrue("Adaptive threshold must cleanly isolate tape from bright pearl ball body", result.isDetected)
+        assertTrue("RPM should be measured near 480 (actual: ${result.opticalRpm})", result.opticalRpm in 380..580)
+    }
 }

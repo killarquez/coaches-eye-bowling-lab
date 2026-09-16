@@ -87,4 +87,83 @@ class OpticalBallDetectorTest {
         val res = detector.detectBall(frame2, width, height, stride)
         assertNull("Motion outside calibrated lane polygon must be ignored", res)
     }
+
+    @Test
+    fun testMultiClusterRejectionPinSweepVsBall() {
+        val calibrator = LaneCalibrator()
+        val foulLeft = Point2D(100.0, 1800.0)
+        val foulRight = Point2D(980.0, 1800.0)
+        val arrowsLeft = Point2D(300.0, 1000.0)
+        val arrowsRight = Point2D(780.0, 1000.0)
+
+        val (_, homography) = calibrator.calibrate(foulLeft, foulRight, arrowsLeft, arrowsRight)!!
+        val detector = OpticalBallDetector()
+        detector.updateHomography(homography)
+
+        val width = 1080
+        val height = 1920
+        val stride = width
+        val size = width * height
+
+        val frame1 = ByteArray(size) { 100.toByte() }
+        detector.detectBall(frame1, width, height, stride)
+
+        // Frame 2 has two distinct motions inside the lane:
+        // Cluster 1: Horizontal pin sweep bar near pin deck (y = 550, width = 140, height = 6) -> aspect ratio ~23.3
+        // Cluster 2: Spherical bowling ball at (540, 1350) with radius = 12 -> aspect ratio ~1.0
+        val frame2 = frame1.copyOf()
+
+        // Draw pin sweep bar
+        for (y in 548..553) {
+            for (x in 450..590) {
+                frame2[y * stride + x] = 210.toByte()
+            }
+        }
+
+        // Draw spherical bowling ball
+        val ballCenterX = 540
+        val ballCenterY = 1350
+        val radius = 12
+        for (y in (ballCenterY - radius)..(ballCenterY + radius)) {
+            for (x in (ballCenterX - radius)..(ballCenterX + radius)) {
+                val dx = x - ballCenterX
+                val dy = y - ballCenterY
+                if (dx * dx + dy * dy <= radius * radius) {
+                    frame2[y * stride + x] = 220.toByte()
+                }
+            }
+        }
+
+        val res = detector.detectBall(frame2, width, height, stride)
+        assertNotNull("Should detect the spherical ball and ignore the pin sweep", res)
+        assertEquals("Centroid X should match the ball position", ballCenterX.toDouble(), res!!.x, 6.0)
+        assertEquals("Centroid Y should match the ball position", ballCenterY.toDouble(), res.y, 6.0)
+    }
+
+    @Test
+    fun testAmbientExposureShiftSuppression() {
+        val calibrator = LaneCalibrator()
+        val foulLeft = Point2D(100.0, 1800.0)
+        val foulRight = Point2D(980.0, 1800.0)
+        val arrowsLeft = Point2D(300.0, 1000.0)
+        val arrowsRight = Point2D(780.0, 1000.0)
+
+        val (_, homography) = calibrator.calibrate(foulLeft, foulRight, arrowsLeft, arrowsRight)!!
+        val detector = OpticalBallDetector()
+        detector.updateHomography(homography)
+
+        val width = 1080
+        val height = 1920
+        val stride = width
+        val size = width * height
+
+        val frame1 = ByteArray(size) { 100.toByte() }
+        detector.detectBall(frame1, width, height, stride)
+
+        // Frame 2: Entire image brightens uniformly by +20 (camera auto-exposure adjustment)
+        // No actual localized ball motion
+        val frame2 = ByteArray(size) { 120.toByte() }
+        val res = detector.detectBall(frame2, width, height, stride)
+        assertNull("Global auto-exposure shift should be suppressed without false ball lock", res)
+    }
 }

@@ -23,8 +23,9 @@ import kotlin.math.sqrt
  * 4. Axis Rotation (0° to 90°) from spin vector heading relative to foul line.
  */
 class OpticalRevCounter(
-    private val contrastThreshold: Int = 180, // Brightness threshold for white/neon tape (0..255)
-    private val targetFps: Double = 120.0
+    private val contrastThreshold: Int = 180, // Fallback brightness threshold for white/neon tape (0..255)
+    private val targetFps: Double = 120.0,
+    private val useAdaptiveThreshold: Boolean = true
 ) {
 
     data class OpticalRevResult(
@@ -42,7 +43,9 @@ class OpticalRevCounter(
         val centroidX: Double,
         val centroidY: Double,
         val orientationAngleRad: Double,
-        val intensity: Double
+        val intensity: Double,
+        val relX: Double = 0.0,
+        val relY: Double = 0.0
     )
 
     private val observations = mutableListOf<TapeObservation>()
@@ -81,12 +84,11 @@ class OpticalRevCounter(
         val minY = max(0, cy - r)
         val maxY = min(height - 1, cy + r)
 
-        var sumX = 0.0
-        var sumY = 0.0
-        var count = 0
+        var sumBallLum = 0L
+        var ballPixelCount = 0
         var maxBrightness = 0
 
-        // 1. Locate brightest high-contrast cluster inside circular ball boundary
+        // 1. Evaluate ball surface luminance statistics and peak tape highlight
         for (y in minY..maxY) {
             val rowOffset = y * stride
             val dy = y - cy
@@ -97,9 +99,47 @@ class OpticalRevCounter(
                 val idx = rowOffset + x
                 if (idx >= imageBytes.size) break
                 val pixelVal = imageBytes[idx].toInt() and 0xFF
+                sumBallLum += pixelVal
+                ballPixelCount++
                 if (pixelVal > maxBrightness) maxBrightness = pixelVal
+            }
+        }
 
-                if (pixelVal >= contrastThreshold) {
+        if (ballPixelCount < 16) {
+            return null
+        }
+
+        val avgBallLum = (sumBallLum.toDouble() / ballPixelCount).toInt()
+        val contrastDelta = maxBrightness - avgBallLum
+
+        // If highlight contrast over the ball body is weak (< 25), no tape is facing the camera
+        if (contrastDelta < 25) {
+            return null
+        }
+
+        // Adaptive threshold: dynamically segments high-contrast tape across ball finishes
+        // Dark balls (lum ~30-60) -> threshold ~110-150
+        // Bright pearl balls (lum ~150-190) -> threshold ~190-240
+        val dynamicThreshold = (avgBallLum + (contrastDelta * 0.55).toInt()).coerceIn(110, 245)
+        val effectiveThreshold = if (useAdaptiveThreshold) dynamicThreshold else contrastThreshold
+
+        var sumX = 0.0
+        var sumY = 0.0
+        var count = 0
+
+        // 2. Locate brightest high-contrast cluster inside circular ball boundary
+        for (y in minY..maxY) {
+            val rowOffset = y * stride
+            val dy = y - cy
+            for (x in minX..maxX) {
+                val dx = x - cx
+                if (dx * dx + dy * dy > r * r) continue
+
+                val idx = rowOffset + x
+                if (idx >= imageBytes.size) break
+                val pixelVal = imageBytes[idx].toInt() and 0xFF
+
+                if (pixelVal >= effectiveThreshold) {
                     sumX += x
                     sumY += y
                     count++
@@ -114,7 +154,7 @@ class OpticalRevCounter(
         val tapeCenterX = sumX / count
         val tapeCenterY = sumY / count
 
-        // 2. Compute 2D central image moments to calculate stripe orientation
+        // 3. Compute 2D central image moments to calculate stripe orientation
         var mu20 = 0.0
         var mu02 = 0.0
         var mu11 = 0.0
@@ -129,7 +169,7 @@ class OpticalRevCounter(
                 if (idx >= imageBytes.size) break
                 val pixelVal = imageBytes[idx].toInt() and 0xFF
 
-                if (pixelVal >= contrastThreshold) {
+                if (pixelVal >= effectiveThreshold) {
                     val px = x - tapeCenterX
                     val py = y - tapeCenterY
                     mu20 += px * px
@@ -157,7 +197,9 @@ class OpticalRevCounter(
             centroidX = tapeCenterX,
             centroidY = tapeCenterY,
             orientationAngleRad = angleRad,
-            intensity = maxBrightness.toDouble()
+            intensity = maxBrightness.toDouble(),
+            relX = relX,
+            relY = relY
         )
 
         updateAngularKinematics(obs)
@@ -217,7 +259,7 @@ class OpticalRevCounter(
         // Extrapolate total rotations over the entire 60ft skid/hook/roll duration
         val totalShotRevs = (measuredRpm / 60.0) * (shotDurationMs / 1000.0)
 
-        // Calculate Axis Tilt and Axis Rotation from the 2D projected trajectory of the tape marker
+        // Calculate Axis Tilt and Axis Rotation from relative trajectory of the tape marker
         val (tiltDeg, rotDeg) = estimateTiltAndRotation()
 
         return OpticalRevResult(
@@ -233,13 +275,14 @@ class OpticalRevCounter(
 
     /**
      * Derives Axis Tilt (0..30°) and Axis Rotation (0..90°) from the precessing ellipse
-     * described by the PAP tape marker on the ball's surface.
+     * described by the PAP tape marker on the ball's surface relative to ball center.
      */
     private fun estimateTiltAndRotation(): Pair<Double, Double> {
         if (observations.size < 4) return Pair(14.0, 55.0)
 
-        val xs = observations.map { it.centroidX }
-        val ys = observations.map { it.centroidY }
+        val hasRel = observations.any { it.relX != 0.0 || it.relY != 0.0 }
+        val xs = if (hasRel) observations.map { it.relX } else observations.map { it.centroidX }
+        val ys = if (hasRel) observations.map { it.relY } else observations.map { it.centroidY }
 
         val spanX = xs.maxOrNull()!! - xs.minOrNull()!!
         val spanY = ys.maxOrNull()!! - ys.minOrNull()!!
@@ -252,9 +295,7 @@ class OpticalRevCounter(
         val tiltDeg = (Math.toDegrees(asin(ratio))).coerceIn(3.0, 28.0)
 
         // Axis Rotation is the direction the spin vector points relative to the foul line
-        val dx = observations.last().centroidX - observations.first().centroidX
-        val dy = observations.last().centroidY - observations.first().centroidY
-        val rotAngle = Math.toDegrees(atan2(abs(dx), abs(dy) + 1e-6))
+        val rotAngle = Math.toDegrees(atan2(spanX, spanY.coerceAtLeast(0.01)))
         val rotDeg = (rotAngle * 1.5).coerceIn(20.0, 85.0)
 
         val roundedTilt = (tiltDeg * 10.0).roundToInt() / 10.0
@@ -276,12 +317,16 @@ class OpticalRevCounter(
             val tMs = (i * (1000.0 / fps)).toLong()
             currentAngle += revsPerFrame * 2.0 * PI
             val normalized = currentAngle % (2.0 * PI)
+            val rx = 15.0 * cos(currentAngle)
+            val ry = 10.0 * sin(currentAngle)
             val obs = TapeObservation(
                 timestampMs = tMs,
-                centroidX = 500.0 + 15.0 * cos(currentAngle),
-                centroidY = 500.0 + 10.0 * sin(currentAngle),
+                centroidX = 500.0 + rx,
+                centroidY = 500.0 + ry,
                 orientationAngleRad = normalized,
-                intensity = 240.0
+                intensity = 240.0,
+                relX = rx,
+                relY = ry
             )
             updateAngularKinematics(obs)
             observations.add(obs)

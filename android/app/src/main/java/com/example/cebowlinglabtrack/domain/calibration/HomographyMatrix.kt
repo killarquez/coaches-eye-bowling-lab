@@ -40,6 +40,14 @@ class HomographyMatrix(
     }
 
     /**
+     * Projects physical lane space (board 1..39, distance 0..60 ft)
+     * back into screen pixel coordinates (u, v).
+     */
+    fun projectLaneToPixel(board: Double, distanceFt: Double): Point2D {
+        return forward(LanePoint(board, distanceFt))
+    }
+
+    /**
      * Projects a camera pixel coordinate (u, v) back to real-world lane coordinates (board, distanceFt).
      * Uses the precomputed inverse matrix.
      */
