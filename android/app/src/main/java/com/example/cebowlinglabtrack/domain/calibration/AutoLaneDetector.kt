@@ -34,29 +34,49 @@ class AutoLaneDetector(
         imageBytes: ByteArray,
         width: Int,
         height: Int,
-        stride: Int = width
+        stride: Int = width,
+        zoomRatio: Float = 1.0f
     ): AutoDetectionResult {
         val w = width.toDouble()
         val h = height.toDouble()
 
-        // 1. Scan rows in the lower region (foul line area: ~80% - 90% of image height)
-        val foulScanY = (h * 0.85).toInt().coerceIn(0, height - 1)
-        val foulEdges = findGutterEdgesAtRow(imageBytes, foulScanY, width, stride)
+        // Multi-row candidate scan across the physical lane region (excluding bowler approach)
+        // If zoomed in (>= 2.0x), lane occupies lower-middle to upper (40% to 80% of height)
+        // If unzoomed (1.0x), lane occupies middle band (38% to 62% of height)
+        val (foulMinPct, foulMaxPct) = if (zoomRatio >= 2.0f) Pair(0.70, 0.82) else Pair(0.50, 0.60)
+        val (arrowsMinPct, arrowsMaxPct) = if (zoomRatio >= 2.0f) Pair(0.42, 0.52) else Pair(0.38, 0.46)
 
-        // 2. Scan rows in the mid region (arrows area: ~55% - 65% of image height)
-        val arrowsScanY = (h * 0.60).toInt().coerceIn(0, height - 1)
-        val arrowEdges = findGutterEdgesAtRow(imageBytes, arrowsScanY, width, stride)
+        val foulScanRows = listOf(
+            (h * foulMinPct).toInt().coerceIn(0, height - 1),
+            (h * ((foulMinPct + foulMaxPct) / 2.0)).toInt().coerceIn(0, height - 1),
+            (h * foulMaxPct).toInt().coerceIn(0, height - 1)
+        )
+        val foulEdges = foulScanRows.mapNotNull { rowY ->
+            findGutterEdgesAtRow(imageBytes, rowY, width, stride)
+        }.maxByOrNull { it.second.x - it.first.x }
 
-        // 3. Fallback defaults if gradient detection does not find clear edges
-        val defaultFlL = Point2D(w * 0.12, h * 0.88)
-        val defaultFlR = Point2D(w * 0.88, h * 0.88)
-        val defaultAlL = Point2D(w * 0.28, h * 0.58)
-        val defaultAlR = Point2D(w * 0.72, h * 0.58)
+        val arrowsScanRows = listOf(
+            (h * arrowsMinPct).toInt().coerceIn(0, height - 1),
+            (h * ((arrowsMinPct + arrowsMaxPct) / 2.0)).toInt().coerceIn(0, height - 1),
+            (h * arrowsMaxPct).toInt().coerceIn(0, height - 1)
+        )
+        val arrowEdges = arrowsScanRows.mapNotNull { rowY ->
+            findGutterEdgesAtRow(imageBytes, rowY, width, stride)
+        }.minByOrNull { it.second.x - it.first.x }
 
-        val flL = foulEdges?.first ?: defaultFlL
-        val flR = foulEdges?.second ?: defaultFlR
-        val alL = arrowEdges?.first ?: defaultAlL
-        val arR = arrowEdges?.second ?: defaultAlR
+        // Default USBC perspective anchor fallback
+        val defaultCalibPair = calibrator.createDefaultCalibration(
+            viewWidth = width.toFloat(),
+            viewHeight = height.toFloat(),
+            zoomRatio = zoomRatio,
+            anchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS
+        )
+        val defaultCalib = defaultCalibPair.first
+
+        val flL = foulEdges?.first ?: defaultCalib.foulLineLeftScreen
+        val flR = foulEdges?.second ?: defaultCalib.foulLineRightScreen
+        val alL = arrowEdges?.first ?: defaultCalib.arrowsLeftScreen
+        val arR = arrowEdges?.second ?: defaultCalib.arrowsRightScreen
 
         // Sanity checks on geometry:
         // - Left edge must be left of right edge
@@ -64,28 +84,29 @@ class AutoLaneDetector(
         val foulWidth = flR.x - flL.x
         val arrowWidth = arR.x - alL.x
 
-        val isValidGeometry = (foulWidth > 0.3 * w) && (arrowWidth > 0.15 * w) && (foulWidth > arrowWidth)
-        val confidence = if (foulEdges != null && arrowEdges != null && isValidGeometry) 0.92 else 0.60
+        val isValidGeometry = (foulWidth > 0.25 * w) && (arrowWidth > 0.12 * w) && (foulWidth > arrowWidth * 0.95)
+        val confidence = if (foulEdges != null && arrowEdges != null && isValidGeometry) 0.92 else 0.65
 
         // Compute optimal optical zoom ratio to fill ~82% of viewport with lane
         val laneCoverage = foulWidth / w
         val optimalZoom = if (isValidGeometry && laneCoverage in 0.15..0.95) {
             (0.82 / laneCoverage).toFloat().coerceIn(1.0f, 3.5f)
         } else {
-            1.0f
+            zoomRatio.coerceIn(1.0f, 3.5f)
         }
 
-        val finalFlL = if (isValidGeometry) flL else defaultFlL
-        val finalFlR = if (isValidGeometry) flR else defaultFlR
-        val finalAlL = if (isValidGeometry) alL else defaultAlL
-        val finalAlR = if (isValidGeometry) arR else defaultAlR
+        val finalFlL = if (isValidGeometry) flL else defaultCalib.foulLineLeftScreen
+        val finalFlR = if (isValidGeometry) flR else defaultCalib.foulLineRightScreen
+        val finalAlL = if (isValidGeometry) alL else defaultCalib.arrowsLeftScreen
+        val finalAlR = if (isValidGeometry) arR else defaultCalib.arrowsRightScreen
 
-        val calibResult = calibrator.calibrate(
+        val calibResult = calibrator.calibrateGutters(
             foulLineLeft = finalFlL,
             foulLineRight = finalFlR,
-            arrowsLeft = finalAlL,
-            arrowsRight = finalAlR
-        ) ?: calibrator.createDefaultCalibration(width.toFloat(), height.toFloat())
+            gutterLeft15ft = finalAlL,
+            gutterRight15ft = finalAlR,
+            calibrationZoomRatio = zoomRatio
+        ) ?: defaultCalibPair
 
         return AutoDetectionResult(
             isSuccess = isValidGeometry,
@@ -114,14 +135,13 @@ class AutoLaneDetector(
         if (rowY < 0 || rowY >= (imageBytes.size / stride)) return null
 
         val rowOffset = rowY * stride
-        val midX = width / 2
 
         var maxLeftGrad = 0
         var leftEdgeX = -1
 
         // Scan from outer left margin toward center
         val leftStart = (width * 0.05).toInt()
-        val leftEnd = (width * 0.40).toInt()
+        val leftEnd = (width * 0.45).toInt()
 
         for (x in leftStart until leftEnd) {
             val idx = rowOffset + x
@@ -140,7 +160,7 @@ class AutoLaneDetector(
         var rightEdgeX = -1
 
         // Scan from center toward outer right margin
-        val rightStart = (width * 0.60).toInt()
+        val rightStart = (width * 0.55).toInt()
         val rightEnd = (width * 0.95).toInt()
 
         for (x in rightStart until rightEnd) {

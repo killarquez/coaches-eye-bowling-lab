@@ -281,5 +281,7 @@ data class LaneCalibration(
     val arrowsLeftScreen: Point2D,
     val arrowsRightScreen: Point2D,
     val homographyMatrixElements: List<Double> = emptyList(),
-    val reprojectionErrorRmse: Double = 0.0
+    val reprojectionErrorRmse: Double = 0.0,
+    val calibrationZoomRatio: Float = 1.0f,
+    val anchorMode: String = "GUTTERS_AT_ARROWS"
 )

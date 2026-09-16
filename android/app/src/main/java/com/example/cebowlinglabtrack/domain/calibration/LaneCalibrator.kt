@@ -34,6 +34,15 @@ data class ProjectedLaneGuides(
 )
 
 /**
+ * Reference calibration anchor modes for lane homography.
+ */
+enum class CalibrationAnchorMode(val displayName: String) {
+    GUTTERS_AT_ARROWS("GUTTERS (0 & 15 FT)"),
+    ARROW_MARKERS("ARROWS (B5 & B35)"),
+    PIN_DECK("PIN DECK (0 & 60 FT)")
+}
+
+/**
  * Manages lane calibration, homography computation, and AR guide projections.
  */
 class LaneCalibrator {
@@ -42,24 +51,46 @@ class LaneCalibrator {
      * Calibrates the perspective transform using 4 known anchor points.
      *
      * Standard calibration points:
-     * 1. Foul line left (gutter edge): Board 1.0, 0.0 ft
-     * 2. Foul line right (gutter edge): Board 39.0, 0.0 ft
-     * 3. Arrows left (Board 5 arrow or gutter at 15 ft): Board 5.0, 15.0 ft
-     * 4. Arrows right (Board 35 arrow or gutter at 15 ft): Board 35.0, 15.0 ft
+     * - In GUTTERS_AT_ARROWS:
+     *   1. Foul line left: Board 1.0, 0.0 ft (left gutter)
+     *   2. Foul line right: Board 39.0, 0.0 ft (right gutter)
+     *   3. 15ft Left: Board 1.0, 15.0 ft (left gutter at arrows)
+     *   4. 15ft Right: Board 39.0, 15.0 ft (right gutter at arrows)
+     * - In ARROW_MARKERS:
+     *   1. Foul line left: Board 1.0, 0.0 ft
+     *   2. Foul line right: Board 39.0, 0.0 ft
+     *   3. Arrows left: Board 5.0, 15.0 ft (1st arrow)
+     *   4. Arrows right: Board 35.0, 15.0 ft (7th arrow)
      */
     fun calibrate(
         foulLineLeft: Point2D,
         foulLineRight: Point2D,
         arrowsLeft: Point2D,
         arrowsRight: Point2D,
-        laneName: String = "Lane 1"
+        laneName: String = "Lane 1",
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.ARROW_MARKERS,
+        calibrationZoomRatio: Float = 1.0f
     ): Pair<LaneCalibration, HomographyMatrix>? {
-        val srcPoints = listOf(
-            LanePoint(1.0, 0.0),                     // Foul line left
-            LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0), // Foul line right
-            LanePoint(5.0, LaneConstants.ARROWS_DISTANCE_FT),     // Arrows left
-            LanePoint(35.0, LaneConstants.ARROWS_DISTANCE_FT)     // Arrows right
-        )
+        val srcPoints = when (anchorMode) {
+            CalibrationAnchorMode.GUTTERS_AT_ARROWS -> listOf(
+                LanePoint(1.0, 0.0),                                       // Foul line left
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),     // Foul line right
+                LanePoint(1.0, LaneConstants.ARROWS_DISTANCE_FT),         // Left gutter at 15ft
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), LaneConstants.ARROWS_DISTANCE_FT) // Right gutter at 15ft
+            )
+            CalibrationAnchorMode.ARROW_MARKERS -> listOf(
+                LanePoint(1.0, 0.0),                                       // Foul line left
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),     // Foul line right
+                LanePoint(5.0, LaneConstants.ARROWS_DISTANCE_FT),         // Arrows left (B5)
+                LanePoint(35.0, LaneConstants.ARROWS_DISTANCE_FT)         // Arrows right (B35)
+            )
+            CalibrationAnchorMode.PIN_DECK -> listOf(
+                LanePoint(1.0, 0.0),
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),
+                LanePoint(1.0, LaneConstants.FOUL_LINE_TO_HEADPIN_FT),
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), LaneConstants.FOUL_LINE_TO_HEADPIN_FT)
+            )
+        }
 
         val dstPoints = listOf(
             foulLineLeft,
@@ -79,10 +110,34 @@ class LaneCalibrator {
             arrowsLeftScreen = arrowsLeft,
             arrowsRightScreen = arrowsRight,
             homographyMatrixElements = homography.elements,
-            reprojectionErrorRmse = rmse
+            reprojectionErrorRmse = rmse,
+            calibrationZoomRatio = calibrationZoomRatio,
+            anchorMode = anchorMode.name
         )
 
         return Pair(calibration, homography)
+    }
+
+    /**
+     * Calibrates directly to physical gutter edges at foul line (0 ft) and arrows (15 ft).
+     */
+    fun calibrateGutters(
+        foulLineLeft: Point2D,
+        foulLineRight: Point2D,
+        gutterLeft15ft: Point2D,
+        gutterRight15ft: Point2D,
+        laneName: String = "Lane 1",
+        calibrationZoomRatio: Float = 1.0f
+    ): Pair<LaneCalibration, HomographyMatrix>? {
+        return calibrate(
+            foulLineLeft = foulLineLeft,
+            foulLineRight = foulLineRight,
+            arrowsLeft = gutterLeft15ft,
+            arrowsRight = gutterRight15ft,
+            laneName = laneName,
+            anchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS,
+            calibrationZoomRatio = calibrationZoomRatio
+        )
     }
 
     /**
@@ -184,30 +239,59 @@ class LaneCalibrator {
     }
 
     /**
-     * Provides default screen anchor coordinates for a standard 1080x1920 or 1080x2400 viewfinder
-     * with tripod mounted behind foul line.
+     * Provides default screen anchor coordinates for a standard phone viewfinder
+     * with tripod mounted behind foul line, scaled to the current zoom ratio.
      */
-    fun createDefaultCalibration(viewWidth: Float, viewHeight: Float): Pair<LaneCalibration, HomographyMatrix> {
-        val foulLeft = Point2D(viewWidth * 0.12, viewHeight * 0.88)
-        val foulRight = Point2D(viewWidth * 0.88, viewHeight * 0.88)
-        val arrowsLeft = Point2D(viewWidth * 0.28, viewHeight * 0.52)
-        val arrowsRight = Point2D(viewWidth * 0.72, viewHeight * 0.52)
+    fun createDefaultCalibration(
+        viewWidth: Float,
+        viewHeight: Float,
+        zoomRatio: Float = 1.0f,
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS
+    ): Pair<LaneCalibration, HomographyMatrix> {
+        // Perspective mapping for standard bowling alley view from approach
+        val foulY = if (zoomRatio >= 2.0f) {
+            viewHeight * (0.76f + 0.04f * (zoomRatio - 2.0f).coerceAtMost(2.0f))
+        } else {
+            viewHeight * (0.58f + 0.18f * (zoomRatio - 1.0f))
+        }
+        val arrowsY = if (zoomRatio >= 2.0f) {
+            viewHeight * (0.46f + 0.02f * (zoomRatio - 2.0f).coerceAtMost(2.0f))
+        } else {
+            viewHeight * (0.42f + 0.04f * (zoomRatio - 1.0f))
+        }
 
-        return calibrate(foulLeft, foulRight, arrowsLeft, arrowsRight)
-            ?: run {
-                val id = HomographyMatrix.identity()
-                Pair(
-                    LaneCalibration(
-                        id = UUID.randomUUID().toString(),
-                        foulLineLeftScreen = foulLeft,
-                        foulLineRightScreen = foulRight,
-                        arrowsLeftScreen = arrowsLeft,
-                        arrowsRightScreen = arrowsRight,
-                        homographyMatrixElements = id.elements
-                    ),
-                    id
-                )
-            }
+        val foulHalfW = (viewWidth * (0.20f + 0.20f * (zoomRatio - 1.0f).coerceIn(0f, 1.5f))).coerceAtMost(viewWidth * 0.45f)
+        val arrowsHalfW = (viewWidth * (0.12f + 0.14f * (zoomRatio - 1.0f).coerceIn(0f, 1.5f))).coerceAtMost(viewWidth * 0.35f)
+        val midX = viewWidth * 0.5f
+
+        val foulLeft = Point2D((midX - foulHalfW).toDouble(), foulY.toDouble())
+        val foulRight = Point2D((midX + foulHalfW).toDouble(), foulY.toDouble())
+        val arrowsLeft = Point2D((midX - arrowsHalfW).toDouble(), arrowsY.toDouble())
+        val arrowsRight = Point2D((midX + arrowsHalfW).toDouble(), arrowsY.toDouble())
+
+        return calibrate(
+            foulLineLeft = foulLeft,
+            foulLineRight = foulRight,
+            arrowsLeft = arrowsLeft,
+            arrowsRight = arrowsRight,
+            anchorMode = anchorMode,
+            calibrationZoomRatio = zoomRatio
+        ) ?: run {
+            val id = HomographyMatrix.identity()
+            Pair(
+                LaneCalibration(
+                    id = UUID.randomUUID().toString(),
+                    foulLineLeftScreen = foulLeft,
+                    foulLineRightScreen = foulRight,
+                    arrowsLeftScreen = arrowsLeft,
+                    arrowsRightScreen = arrowsRight,
+                    homographyMatrixElements = id.elements,
+                    calibrationZoomRatio = zoomRatio,
+                    anchorMode = anchorMode.name
+                ),
+                id
+            )
+        }
     }
 
     companion object {

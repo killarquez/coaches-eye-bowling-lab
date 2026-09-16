@@ -151,11 +151,14 @@ fun MainNavigation(
                 BowlingScreenTab.CALIBRATE -> {
                     CalibrationScreen(
                         currentCalibration = uiState.calibration,
+                        zoomRatio = uiState.zoomRatio,
+                        onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
+                        onCalibrateDefault = { viewModel.calibrateWithDefaults() },
                         onAutoDetectLane = { bytes, w, h, s ->
                             viewModel.autoCalibrateFromFrame(bytes, w, h, s)
                         },
-                        onSaveCalibration = { flL, flR, arL, arR ->
-                            viewModel.updateCalibration(flL, flR, arL, arR)
+                        onSaveCalibration = { flL, flR, arL, arR, mode ->
+                            viewModel.updateCalibration(flL, flR, arL, arR, mode)
                             currentTab = BowlingScreenTab.TRACK
                         },
                         onCancel = { currentTab = BowlingScreenTab.TRACK }

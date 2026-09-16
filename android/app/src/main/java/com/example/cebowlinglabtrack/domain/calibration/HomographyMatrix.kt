@@ -104,6 +104,24 @@ class HomographyMatrix(
         return HomographyMatrix(res)
     }
 
+    /**
+     * Scales this homography for a camera hardware or digital zoom factor relative to the
+     * calibration zoom factor, preserving optical alignment around the viewport center (cx, cy).
+     *
+     * @param scaleFactor Ratio of current zoom / calibration zoom (e.g. 2.5x / 1.0x = 2.5)
+     * @param centerX Optical / Viewport center X (e.g. width / 2)
+     * @param centerY Optical / Viewport center Y (e.g. height / 2)
+     */
+    fun scaleForZoom(scaleFactor: Double, centerX: Double, centerY: Double): HomographyMatrix {
+        if (abs(scaleFactor - 1.0) < 1e-4) return this
+        val mZoom = HomographyMatrix(
+            scaleFactor, 0.0, centerX * (1.0 - scaleFactor),
+            0.0, scaleFactor, centerY * (1.0 - scaleFactor),
+            0.0, 0.0, 1.0
+        )
+        return mZoom.multiply(this)
+    }
+
     companion object {
         fun identity(): HomographyMatrix = HomographyMatrix(
             doubleArrayOf(

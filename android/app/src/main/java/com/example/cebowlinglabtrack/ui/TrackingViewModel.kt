@@ -91,6 +91,11 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
     private var simulationJob: Job? = null
 
+    private var baseHomography: HomographyMatrix = homography
+    private var baseCalibrationZoom: Float = 1.0f
+    private var viewportWidth: Float = 1080f
+    private var viewportHeight: Float = 1920f
+
     init {
         tripodAngleAdvisor.startListening()
 
@@ -119,25 +124,31 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             repository.loadInitialData()
             val existingCalib = repository.activeCalibration.value
             if (existingCalib != null && existingCalib.homographyMatrixElements.size == 9 && existingCalib.reprojectionErrorRmse < 15.0) {
-                homography = HomographyMatrix(existingCalib.homographyMatrixElements.toDoubleArray())
-                opticalBallDetector.updateHomography(homography)
-                trajectoryTracker.updateHomography(homography)
-                pinDeckDetector.updateHomography(homography)
-                val guides = calibrator.generateProjectedGuides(homography, _uiState.value.activeTargetLine)
+                val h = HomographyMatrix(existingCalib.homographyMatrixElements.toDoubleArray())
+                baseHomography = h
+                baseCalibrationZoom = if (existingCalib.calibrationZoomRatio in 1.0f..5.0f) existingCalib.calibrationZoomRatio else 1.0f
+                homography = h
+                opticalBallDetector.updateHomography(h)
+                trajectoryTracker.updateHomography(h)
+                pinDeckDetector.updateHomography(h)
+                val guides = calibrator.generateProjectedGuides(h, _uiState.value.activeTargetLine)
                 _uiState.value = _uiState.value.copy(
                     calibration = existingCalib,
                     isLaneCalibrated = true,
                     calibrationQuality = "CALIBRATED",
-                    projectedGuides = guides
+                    projectedGuides = guides,
+                    zoomRatio = baseCalibrationZoom
                 )
             } else {
                 // Initial launch: uncalibrated physical lane (safety interlock active)
                 val (defaultCalib, defaultH) = calibrator.createDefaultCalibration(1080f, 1920f)
+                baseHomography = defaultH
+                baseCalibrationZoom = 1.0f
                 homography = defaultH
-                opticalBallDetector.updateHomography(homography)
-                trajectoryTracker.updateHomography(homography)
-                pinDeckDetector.updateHomography(homography)
-                val guides = calibrator.generateProjectedGuides(homography, _uiState.value.activeTargetLine)
+                opticalBallDetector.updateHomography(defaultH)
+                trajectoryTracker.updateHomography(defaultH)
+                pinDeckDetector.updateHomography(defaultH)
+                val guides = calibrator.generateProjectedGuides(defaultH, _uiState.value.activeTargetLine)
                 _uiState.value = _uiState.value.copy(
                     calibration = defaultCalib,
                     isLaneCalibrated = false,
@@ -277,6 +288,13 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun updateViewportSize(w: Float, h: Float) {
+        if (w > 50f && h > 50f) {
+            viewportWidth = w
+            viewportHeight = h
+        }
+    }
+
     /**
      * Auto-detects the lane and computes calibration + optimal auto-zoom in 1 click.
      */
@@ -286,11 +304,16 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         height: Int,
         stride: Int = width
     ): Boolean {
-        val result = autoLaneDetector.detectLaneFromFrame(imageBytes, width, height, stride)
+        updateViewportSize(width.toFloat(), height.toFloat())
+        val currentZoom = _uiState.value.zoomRatio
+        val result = autoLaneDetector.detectLaneFromFrame(imageBytes, width, height, stride, currentZoom)
         if (result.isSuccess) {
             val calib = result.calibration
             val newH = HomographyMatrix(calib.homographyMatrixElements.toDoubleArray())
+            baseHomography = newH
+            baseCalibrationZoom = currentZoom
             homography = newH
+
             opticalBallDetector.updateHomography(newH)
             trajectoryTracker.updateHomography(newH)
             pinDeckDetector.updateHomography(newH)
@@ -326,12 +349,22 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Arms the tracker using standard USBC physical lane dimensions preset.
+     * Arms the tracker using standard USBC physical lane dimensions preset for the active zoom.
      */
-    fun calibrateWithDefaults() {
-        val defaultCalib = LaneCalibrator.DEFAULT_CALIBRATION
-        val newH = HomographyMatrix(defaultCalib.homographyMatrixElements.toDoubleArray())
+    fun calibrateWithDefaults(
+        anchorMode: com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode = com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode.GUTTERS_AT_ARROWS
+    ) {
+        val currentZoom = _uiState.value.zoomRatio
+        val (defaultCalib, newH) = calibrator.createDefaultCalibration(
+            viewWidth = viewportWidth,
+            viewHeight = viewportHeight,
+            zoomRatio = currentZoom,
+            anchorMode = anchorMode
+        )
+        baseHomography = newH
+        baseCalibrationZoom = currentZoom
         homography = newH
+
         opticalBallDetector.updateHomography(newH)
         trajectoryTracker.updateHomography(newH)
         pinDeckDetector.updateHomography(newH)
@@ -339,7 +372,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = _uiState.value.copy(
             calibration = defaultCalib,
             isLaneCalibrated = true,
-            calibrationQuality = "CALIBRATED (STANDARD)",
+            calibrationQuality = "CALIBRATED (USBC PRESET)",
             projectedGuides = guides
         )
         viewModelScope.launch {
@@ -348,10 +381,29 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Adjusts the camera hardware zoom ratio.
+     * Adjusts the camera hardware zoom ratio and dynamically scales homography
+     * to keep all AR guides, pins, chevrons and ball tracking 100% locked to the physical lane.
      */
     fun setZoomRatio(zoomRatio: Float) {
-        _uiState.value = _uiState.value.copy(zoomRatio = zoomRatio.coerceIn(1.0f, 5.0f))
+        val clampedZoom = zoomRatio.coerceIn(1.0f, 5.0f)
+        val currentZoom = _uiState.value.zoomRatio
+        if (kotlin.math.abs(clampedZoom - currentZoom) < 0.01f) return
+
+        val scaleFactor = (clampedZoom / baseCalibrationZoom.coerceAtLeast(0.5f)).toDouble()
+        val cx = (viewportWidth / 2.0)
+        val cy = (viewportHeight / 2.0)
+
+        val scaledH = baseHomography.scaleForZoom(scaleFactor, cx, cy)
+        homography = scaledH
+        opticalBallDetector.updateHomography(scaledH)
+        trajectoryTracker.updateHomography(scaledH)
+        pinDeckDetector.updateHomography(scaledH)
+        val guides = calibrator.generateProjectedGuides(scaledH, _uiState.value.activeTargetLine)
+
+        _uiState.value = _uiState.value.copy(
+            zoomRatio = clampedZoom,
+            projectedGuides = guides
+        )
     }
 
     /**
@@ -399,11 +451,23 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         foulLeft: Point2D,
         foulRight: Point2D,
         arrowsLeft: Point2D,
-        arrowsRight: Point2D
+        arrowsRight: Point2D,
+        anchorMode: com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode = com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode.GUTTERS_AT_ARROWS
     ) {
-        val result = calibrator.calibrate(foulLeft, foulRight, arrowsLeft, arrowsRight) ?: return
+        val currentZoom = _uiState.value.zoomRatio
+        val result = calibrator.calibrate(
+            foulLineLeft = foulLeft,
+            foulLineRight = foulRight,
+            arrowsLeft = arrowsLeft,
+            arrowsRight = arrowsRight,
+            anchorMode = anchorMode,
+            calibrationZoomRatio = currentZoom
+        ) ?: return
         val (calib, newH) = result
+        baseHomography = newH
+        baseCalibrationZoom = currentZoom
         homography = newH
+
         opticalBallDetector.updateHomography(newH)
         trajectoryTracker.updateHomography(newH)
         pinDeckDetector.updateHomography(newH)
@@ -412,7 +476,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = _uiState.value.copy(
             calibration = calib,
             isLaneCalibrated = true,
-            calibrationQuality = "CALIBRATED (MANUAL 4-PT)",
+            calibrationQuality = "CALIBRATED (${anchorMode.displayName})",
             projectedGuides = guides
         )
 
