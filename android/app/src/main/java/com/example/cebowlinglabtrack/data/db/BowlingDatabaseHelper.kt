@@ -156,8 +156,8 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 email = "alfredo@cebowlinglab.com",
                 phone = "(555) 123-4567",
                 heightInches = 70.0,
-                handedness = Handedness.LEFT,
-                style = BowlingStyle.ONE_HANDED_THUMB,
+                handedness = Handedness.RIGHT,
+                style = BowlingStyle.TWO_HANDED,
                 bookAverage = 218,
                 careerHighGame = 300,
                 careerHighSeries = 788,
@@ -196,6 +196,15 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 put("notes", bowler.notes)
             }
             db.insert("bowlers", null, cv)
+        }
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        try {
+            db.execSQL("UPDATE bowlers SET handedness = 'RIGHT', style = 'TWO_HANDED' WHERE id = 'CEB-103'")
+        } catch (e: Exception) {
+            // Table might not exist yet during creation
         }
     }
 
@@ -538,6 +547,6 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
 
     companion object {
         const val DATABASE_NAME = "ce_bowling_track.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
     }
 }

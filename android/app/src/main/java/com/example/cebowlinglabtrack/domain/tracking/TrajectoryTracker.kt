@@ -78,11 +78,15 @@ class TrajectoryTracker(
 
         if (laneCoord == null) {
             // Ball occluded or not detected this frame
-            if (state == TrackingState.BALL_IN_FLIGHT || state == TrackingState.BALL_RELEASED) {
+            if (state == TrackingState.BALL_IN_FLIGHT || state == TrackingState.BALL_RELEASED || state == TrackingState.PIN_DECK_ENTRY) {
                 ekf?.let { filter ->
                     filter.coast(dtSec)
-                    if (filter.consecutiveCoastFrames > 8 || filter.yFt >= LaneConstants.TOTAL_LANE_LENGTH_FT) {
-                        completeShot()
+                    if (filter.consecutiveCoastFrames > 10 || filter.yFt >= LaneConstants.FOUL_LINE_TO_HEADPIN_FT) {
+                        if (filter.yFt >= 42.0 && filteredPoints.size >= 4) {
+                            completeShot()
+                        } else if (filter.consecutiveCoastFrames > 18) {
+                            reset()
+                        }
                     }
                 }
             }
@@ -93,28 +97,33 @@ class TrajectoryTracker(
         val zY = laneCoord.distanceFt
 
         // Reject impossible detections far outside lane bounds
-        if (zX < -2.0 || zX > 42.0 || zY < -8.0 || zY > 65.0) {
+        if (zX < -3.0 || zX > 43.0 || zY < -8.0 || zY > 66.0) {
             return null
         }
 
         // Handle state machine transitions
         when (state) {
             TrackingState.IDLE, TrackingState.APPROACH_DETECTED -> {
-                // Ball detection near foul line (Y within -3 ft to +5 ft) indicates ball release
-                if (zY in -3.0..10.0) {
-                    state = TrackingState.BALL_RELEASED
-                    shotStartTimeMs = timeMs
+                // Ball detection from approach (-4 ft) all the way past arrows (+35 ft) initiates tracking
+                if (zY in -4.0..35.0) {
+                    val estVy = 25.0 // ~17 mph default
+                    val offsetSec = (zY.coerceAtLeast(0.0) / estVy)
+                    shotStartTimeMs = timeMs - (offsetSec * 1000).toLong()
+
+                    state = if (zY >= 15.0) TrackingState.BALL_IN_FLIGHT else TrackingState.BALL_RELEASED
                     ekf = ExtendedKalmanFilter(
                         initialX = zX,
                         initialY = zY,
                         initialVx = 0.0,
-                        initialVy = 25.0, // ~17 mph
+                        initialVy = estVy,
                         initialAx = 0.0
                     )
                     val pt = TrajectoryPoint(
                         xBoard = zX,
                         yFt = zY,
-                        timeMs = 0L,
+                        timeMs = (offsetSec * 1000).toLong(),
+                        vx = 0.0,
+                        vy = estVy,
                         isFiltered = true
                     )
                     filteredPoints.add(pt)
@@ -127,7 +136,7 @@ class TrajectoryTracker(
                 filter.predict(dtSec)
                 val accepted = filter.update(zX, zY)
 
-                val elapsedMs = timeMs - shotStartTimeMs
+                val elapsedMs = (timeMs - shotStartTimeMs).coerceAtLeast(0L)
                 val filteredPoint = TrajectoryPoint(
                     xBoard = filter.xBoard,
                     yFt = filter.yFt,
@@ -144,7 +153,7 @@ class TrajectoryTracker(
                 if (filter.yFt >= 55.0) {
                     state = TrackingState.PIN_DECK_ENTRY
                 }
-                if (filter.yFt >= 60.0) {
+                if (filter.yFt >= 59.5) {
                     completeShot()
                 }
 
@@ -155,11 +164,11 @@ class TrajectoryTracker(
                 val filter = ekf ?: return null
                 filter.predict(dtSec)
                 filter.update(zX, zY)
-                val elapsedMs = timeMs - shotStartTimeMs
+                val elapsedMs = (timeMs - shotStartTimeMs).coerceAtLeast(0L)
                 val pt = TrajectoryPoint(filter.xBoard, filter.yFt, elapsedMs, filter.vx, filter.vy, true)
                 filteredPoints.add(pt)
 
-                if (filter.yFt >= 61.5) {
+                if (filter.yFt >= 60.5) {
                     completeShot()
                 }
                 return pt

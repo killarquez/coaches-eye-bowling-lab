@@ -451,29 +451,59 @@ fun LiveTrackingScreen(
                             }
                         }
 
-                        // 10-Pin Deck Lock Status Chip (Strike.app style)
+                        // 10-Pin Deck Lock Status Chip with Mini 10-Pin Graphic (Strike.app style)
                         if (state.isLaneCalibrated) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(UsbcNavyDark.copy(alpha = 0.85f))
-                                    .border(1.dp, NeonStrikeGreen.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 7.dp, vertical = 6.dp)
+                                    .background(UsbcNavyDark.copy(alpha = 0.90f))
+                                    .border(1.dp, if (state.standingPins.size == 10) NeonStrikeGreen.copy(alpha = 0.8f) else ElectricAmber, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "[||||||||||]",
-                                        color = NeonStrikeGreen,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "${state.standingPins.size} PINS",
-                                        color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    // Mini 10-Pin Triangle Canvas (Pins 7,8,9,10 / 4,5,6 / 2,3 / 1)
+                                    Canvas(modifier = Modifier.size(width = 18.dp, height = 16.dp)) {
+                                        val pinR = 1.4f
+                                        val pinPositions = mapOf(
+                                            7 to Offset(1.5f, 2f), 8 to Offset(6f, 2f), 9 to Offset(10.5f, 2f), 10 to Offset(15f, 2f),
+                                            4 to Offset(3.5f, 6.5f), 5 to Offset(8.25f, 6.5f), 6 to Offset(13f, 6.5f),
+                                            2 to Offset(5.5f, 11f), 3 to Offset(11f, 11f),
+                                            1 to Offset(8.25f, 15f)
+                                        )
+                                        for ((pinNum, offset) in pinPositions) {
+                                            val isStanding = state.standingPins.contains(pinNum)
+                                            drawCircle(
+                                                color = if (isStanding) Color.White else Color(0x40888888),
+                                                radius = pinR,
+                                                center = offset
+                                            )
+                                        }
+                                    }
+                                    Column {
+                                        Text(
+                                            text = when (state.trackingState) {
+                                                TrackingState.PIN_DECK_ENTRY -> "SCATTERING..."
+                                                TrackingState.BALL_IN_FLIGHT -> "BALL IN FLIGHT"
+                                                TrackingState.BALL_RELEASED -> "BALL RELEASED"
+                                                else -> if (state.standingPins.size == 10) "10 PINS READY" else "${state.standingPins.size} PINS"
+                                            },
+                                            color = when (state.trackingState) {
+                                                TrackingState.PIN_DECK_ENTRY -> ElectricAmber
+                                                TrackingState.BALL_IN_FLIGHT, TrackingState.BALL_RELEASED -> NeonStrikeGreen
+                                                else -> Color.White
+                                            },
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (state.standingPins.size in 1..9 && state.trackingState == TrackingState.IDLE) {
+                                            Text(
+                                                text = "LEAVING: ${state.standingPins.joinToString(",")}",
+                                                color = ElectricAmber,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -679,31 +709,65 @@ fun LiveTrackingScreen(
                         )
                     }
 
-                    // Zoom Controls
+                    // Zoom Controls & 1x / 3x Quick Chips
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
                             .background(DarkSurface)
-                            .border(1.dp, DarkCardBorder, RoundedCornerShape(12.dp)),
-                        verticalAlignment = Alignment.CenterVertically
+                            .border(1.dp, DarkCardBorder, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
+                        // 1x Quick Chip
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (kotlin.math.abs(state.zoomRatio - 1.0f) < 0.2f) UsbcGold else Color.Transparent)
+                                .clickable { onZoomChange?.invoke(1.0f) }
+                                .padding(horizontal = 7.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "1x",
+                                color = if (kotlin.math.abs(state.zoomRatio - 1.0f) < 0.2f) Color.Black else TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // 3x Quick Chip
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (kotlin.math.abs(state.zoomRatio - 3.0f) < 0.2f) UsbcGold else Color.Transparent)
+                                .clickable { onZoomChange?.invoke(3.0f) }
+                                .padding(horizontal = 7.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "3x",
+                                color = if (kotlin.math.abs(state.zoomRatio - 3.0f) < 0.2f) Color.Black else TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
                         IconButton(
                             onClick = { onZoomChange?.invoke((state.zoomRatio - 0.2f).coerceAtLeast(1.0f)) },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(28.dp)
                         ) {
-                            Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.ZoomOut, contentDescription = "Zoom Out", tint = TextSecondary, modifier = Modifier.size(16.dp))
                         }
                         Text(
                             text = "${String.format("%.1f", state.zoomRatio)}x",
                             color = NeonCyan,
-                            fontSize = 11.sp,
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                         IconButton(
                             onClick = { onZoomChange?.invoke((state.zoomRatio + 0.2f).coerceAtMost(3.5f)) },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(28.dp)
                         ) {
-                            Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", tint = TextSecondary, modifier = Modifier.size(16.dp))
                         }
                     }
 

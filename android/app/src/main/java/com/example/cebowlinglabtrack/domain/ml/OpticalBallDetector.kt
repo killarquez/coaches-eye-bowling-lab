@@ -15,8 +15,8 @@ import kotlin.math.sqrt
  */
 class OpticalBallDetector(
     private var homography: HomographyMatrix? = null,
-    private val motionThreshold: Int = 28,
-    private val minClusterPixels: Int = 12,
+    private val motionThreshold: Int = 16,
+    private val minClusterPixels: Int = 6,
     private val maxClusterPixels: Int = 3000
 ) : BallDetectorEngine {
 
@@ -110,8 +110,8 @@ class OpticalBallDetector(
         var roiMaxY = height
 
         if (poly != null && poly.size == 4) {
-            roiMinY = max(0, laneMinY.toInt() - 15)
-            roiMaxY = min(height - 1, laneMaxY.toInt() + 15)
+            roiMinY = max(0, laneMinY.toInt() - 20)
+            roiMaxY = min(height - 1, laneMaxY.toInt() + 45) // Include release in approach
         }
 
         // Adaptive ambient compensation: sample lane midpoint to detect global exposure shift
@@ -133,7 +133,7 @@ class OpticalBallDetector(
             }
         }
         val ambientShift = if (sampleCount > 0) ambientSum / sampleCount else 0
-        val effectiveMotionThreshold = max(motionThreshold, abs(ambientShift) + 16)
+        val effectiveMotionThreshold = max(motionThreshold, min(22, abs(ambientShift) + 12))
 
         // Subsample step for speed (step=2 checks 1 in 4 pixels; sub-millisecond on mobile CPU)
         val step = 2
@@ -196,10 +196,11 @@ class OpticalBallDetector(
                         val dx = cx - lastKnownBallPos!!.x
                         val dy = cy - lastKnownBallPos!!.y
                         val dist = sqrt(dx * dx + dy * dy)
-                        // Penalize moving backwards towards foul line in y-down coords
-                        dist + (if (dy > 15.0) 200.0 else 0.0)
+                        // Ball moves towards pins (screen Y decreases, dy < 0)
+                        val directionPenalty = if (dy > 10.0) 250.0 else (if (dy < -2.0) -25.0 else 0.0)
+                        dist + directionPenalty
                     } else {
-                        // At ball release, favor cluster closest to foul line (largest Y)
+                        // At ball release, favor cluster closest to foul line with spherical aspect ratio
                         val aspectPenalty = abs(aspect - 1.0) * 40.0
                         (roiMaxY - cy) + aspectPenalty
                     }
@@ -239,18 +240,18 @@ class OpticalBallDetector(
         val deckR = poly[2]
         val deckL = poly[3]
 
-        if (y < laneMinY - 10 || y > laneMaxY + 10) {
+        if (y < laneMinY - 20 || y > laneMaxY + 50) {
             return Pair(0, -1)
         }
 
-        val tL = ((y - deckL.y) / (flL.y - deckL.y + 1e-9)).coerceIn(0.0, 1.0)
-        val tR = ((y - deckR.y) / (flR.y - deckR.y + 1e-9)).coerceIn(0.0, 1.0)
+        val tL = ((y - deckL.y) / (flL.y - deckL.y + 1e-9)).coerceIn(0.0, 1.2)
+        val tR = ((y - deckR.y) / (flR.y - deckR.y + 1e-9)).coerceIn(0.0, 1.2)
 
         val xL = deckL.x + tL * (flL.x - deckL.x)
         val xR = deckR.x + tR * (flR.x - deckR.x)
 
-        val minX = max(0, (min(xL, xR) - 6).toInt())
-        val maxX = min(width - 1, (max(xL, xR) + 6).toInt())
+        val minX = max(0, (min(xL, xR) - 35).toInt())
+        val maxX = min(width - 1, (max(xL, xR) + 35).toInt())
 
         return Pair(minX, maxX)
     }
