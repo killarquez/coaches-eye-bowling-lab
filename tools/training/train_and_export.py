@@ -335,13 +335,17 @@ def train_yolo_and_export(args):
         print("[*] Initializing YOLOv8n backbone for single-class bowling ball tracking...")
         model = YOLO("yolov8n.pt")
 
-        print(f"[*] Beginning training for {args.epochs} epochs with img_size={args.img_size}...")
+        import torch
+        device_id = 0 if torch.cuda.is_available() else "cpu"
+        print(f"[*] Beginning training for {args.epochs} epochs on device '{device_id}' with img_size={args.img_size}...")
         results = model.train(
             data=str(data_yaml),
             epochs=args.epochs,
             batch=args.batch_size,
             imgsz=args.img_size,
             single_cls=True,
+            device=device_id,
+            workers=4,
             project="runs/detect",
             name="bowling_ball_detector",
         )

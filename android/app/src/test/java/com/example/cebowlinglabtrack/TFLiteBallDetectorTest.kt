@@ -62,6 +62,43 @@ class TFLiteBallDetectorTest {
         }
     }
 
+    /**
+     * Synthetic runner simulating YOLOv8 tensor output shape [1, 5, anchors].
+     */
+    private class MockYoloRunner(
+        private val mockCx: Float = 208f,
+        private val mockCy: Float = 312f,
+        private val mockW: Float = 20.8f,
+        private val mockH: Float = 20.8f,
+        private val mockConf: Float = 0.88f,
+        private val anchorCount: Int = 3549
+    ) : TFLiteRunner {
+        var isClosed = false
+        var runCount = 0
+
+        override fun isYoloFormat(): Boolean = true
+        override fun getYoloAnchorCount(): Int = anchorCount
+        override fun getInputChannels(): Int = 3
+
+        override fun run(input: ByteBuffer, outputs: Map<Int, Any>) {
+            runCount++
+            @Suppress("UNCHECKED_CAST")
+            val yoloOut = outputs[0] as? Array<Array<FloatArray>>
+            if (yoloOut != null) {
+                // Set anchor 50 to mock detection values
+                yoloOut[0][0][50] = mockCx
+                yoloOut[0][1][50] = mockCy
+                yoloOut[0][2][50] = mockW
+                yoloOut[0][3][50] = mockH
+                yoloOut[0][4][50] = mockConf
+            }
+        }
+
+        override fun close() {
+            isClosed = true
+        }
+    }
+
     @Test
     fun testInitializationAndCleanClosure() {
         val mockRunner = MockTFLiteRunner()
@@ -216,5 +253,41 @@ class TFLiteBallDetectorTest {
         val pt = engine.detectBall(imageBytes, 320, 320)
         assertNotNull("Polymorphic call via BallDetectorEngine must succeed", pt)
         assertTrue("Latency must be positive", engine.getLastInferenceLatencyMs() >= 0.0)
+    }
+
+    @Test
+    fun testYoloOutputFormatParsingAndCentroidComputation() {
+        val mockRunner = MockYoloRunner(
+            mockCx = 208.0f,  // 208 / 416 = 0.50 normalized
+            mockCy = 312.0f,  // 312 / 416 = 0.75 normalized
+            mockW = 20.8f,    // 20.8 / 416 = 0.05 normalized
+            mockH = 20.8f,
+            mockConf = 0.88f
+        )
+        val detector = TFLiteBallDetector.createForTesting(mockRunner, inputSize = 416)
+
+        val width = 1080
+        val height = 1920
+        val directBuffer = ByteBuffer.allocateDirect(width * height)
+        val result = detector.detect(directBuffer, width, height)
+
+        assertNotNull("YOLO detector should detect ball", result)
+        assertEquals(0.88f, result!!.confidence, 0.001f)
+
+        val expectedScreenX = 0.50 * width   // 540.0
+        val expectedScreenY = 0.75 * height  // 1440.0
+        assertEquals(expectedScreenX, result.centroid.x, 0.01)
+        assertEquals(expectedScreenY, result.centroid.y, 0.01)
+
+        val radius = detector.getLastBallRadiusPx()
+        assertTrue("Radius should be positive", radius >= 8)
+        assertTrue("Latency should be non-negative", result.latencyMs >= 0.0)
+    }
+
+    @Test
+    fun testBowlingBallModelAssetFileIntegrity() {
+        val modelFile = java.io.File("src/main/assets/models/bowling_ball_v1.tflite")
+        assertTrue("TFLite model asset must exist in src/main/assets/models/", modelFile.exists())
+        assertTrue("TFLite model asset must be greater than 1MB", modelFile.length() > 1_000_000)
     }
 }

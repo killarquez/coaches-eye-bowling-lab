@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 scratch/
 dataset/
+runs/
+weights/
+*.pt
