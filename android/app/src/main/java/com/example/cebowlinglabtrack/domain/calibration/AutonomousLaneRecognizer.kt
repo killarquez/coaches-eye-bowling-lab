@@ -139,13 +139,27 @@ class AutonomousLaneRecognizer(
         // 4. Stage 4: Solve 4-point homography (0 ft to 60 ft) and project exact 15-ft arrows
         val pinDeckY = pinRack.bottomY
 
+        val opticalCenterX = width / 2.0
+        val opticalCenterY = height / 2.0
+        val focalLengthPx = kotlin.math.max(width, height).toDouble()
+        val lensCorrector = LensDistortionCorrector(opticalCenterX, opticalCenterY, focalLengthPx)
+
         // Foul Line corners (0.0 ft, Boards 1 & 39)
-        val flL = Point2D(gutters.xLeftAt(foulY.toDouble()), foulY.toDouble())
-        val flR = Point2D(gutters.xRightAt(foulY.toDouble()), foulY.toDouble())
+        val rawFlL = Point2D(gutters.xLeftAt(foulY.toDouble()), foulY.toDouble())
+        val rawFlR = Point2D(gutters.xRightAt(foulY.toDouble()), foulY.toDouble())
 
         // Pin Deck corners (60.0 ft, Boards 1 & 39)
-        val pinDeckL = Point2D(gutters.xLeftAt(pinDeckY), pinDeckY)
-        val pinDeckR = Point2D(gutters.xRightAt(pinDeckY), pinDeckY)
+        val rawPinDeckL = Point2D(gutters.xLeftAt(pinDeckY), pinDeckY)
+        val rawPinDeckR = Point2D(gutters.xRightAt(pinDeckY), pinDeckY)
+
+        // Undistort corners using Brown-Conrady radial model prior to DLT fitting
+        val undistortedCorners = lensCorrector.undistortCalibrationCorners(
+            rawFlL, rawFlR, rawPinDeckL, rawPinDeckR
+        )
+        val flL = undistortedCorners[0]
+        val flR = undistortedCorners[1]
+        val pinDeckL = undistortedCorners[2]
+        val pinDeckR = undistortedCorners[3]
 
         // Compute 4-point homography using PIN_DECK mode (0 ft & 60 ft)
         val deckCalibResult = calibrator.calibrate(

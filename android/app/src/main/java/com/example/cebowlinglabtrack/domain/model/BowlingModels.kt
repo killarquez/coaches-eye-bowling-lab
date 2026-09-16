@@ -42,7 +42,8 @@ data class SpectoSpatialMetrics(
 data class SpectoAngleMetrics(
     @SerialName("launch_angle_deg") val launchAngleDeg: Double,
     @SerialName("breakpoint_angle_deg") val breakpointAngleDeg: Double,
-    @SerialName("impact_angle_deg") val impactAngleDeg: Double
+    @SerialName("impact_angle_deg") val impactAngleDeg: Double,
+    @SerialName("strike_probability_percent") val strikeProbabilityPercent: Double = 0.0
 )
 
 /**

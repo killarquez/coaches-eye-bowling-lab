@@ -53,6 +53,8 @@ object CameraPipelineHelper {
         return supportedRanges.maxByOrNull { it.upper } ?: Range(30, 30)
     }
 
+    private val laneConfigurator = LaneCameraConfigurator()
+
     /**
      * Applies manual 3A lock controls to CameraX ImageAnalysis via Camera2Interop.
      */
@@ -86,15 +88,11 @@ object CameraPipelineHelper {
             )
         }
 
-        // 3. Auto White Balance (Eliminate Bayer green tint by using Camera2 ISP AWB)
+        // 3. Auto White Balance (Eliminate Bayer green tint by using Camera2 ISP AWB or Fluorescent)
         if (config.lockAwb) {
             interop.setCaptureRequestOption(
                 CaptureRequest.CONTROL_AWB_MODE,
-                CaptureRequest.CONTROL_AWB_MODE_AUTO
-            )
-            interop.setCaptureRequestOption(
-                CaptureRequest.CONTROL_AWB_LOCK,
-                true
+                CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT
             )
         } else {
             interop.setCaptureRequestOption(
@@ -103,7 +101,7 @@ object CameraPipelineHelper {
             )
         }
 
-        // 4. Lock Autofocus to manual hyperfocal distance
+        // 4. Lock Autofocus to manual hyperfocal distance (e.g. ~27-33 ft down-lane)
         if (config.lockAf) {
             interop.setCaptureRequestOption(
                 CaptureRequest.CONTROL_AF_MODE,
@@ -114,5 +112,21 @@ object CameraPipelineHelper {
                 config.hyperfocalDiopters
             )
         }
+
+        // 5. Disable Optical and Digital Video Stabilization to preserve 1:1 pixel homography
+        interop.setCaptureRequestOption(
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        )
+        interop.setCaptureRequestOption(
+            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+        )
+
+        // 6. Request Hardware ISP High-Quality Lens Distortion Correction
+        interop.setCaptureRequestOption(
+            CaptureRequest.DISTORTION_CORRECTION_MODE,
+            CaptureRequest.DISTORTION_CORRECTION_MODE_HIGH_QUALITY
+        )
     }
 }

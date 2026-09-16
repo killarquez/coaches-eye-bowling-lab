@@ -2,6 +2,7 @@ package com.example.cebowlinglabtrack.domain.tracking
 
 import com.example.cebowlinglabtrack.domain.model.BallMetrics
 import com.example.cebowlinglabtrack.domain.model.LaneConstants
+import com.example.cebowlinglabtrack.domain.model.Point2D
 import com.example.cebowlinglabtrack.domain.model.SpectoAngleMetrics
 import com.example.cebowlinglabtrack.domain.model.SpectoDynamicsMetrics
 import com.example.cebowlinglabtrack.domain.model.SpectoSpatialMetrics
@@ -67,8 +68,11 @@ object TelemetryExtractor {
         // Launch Angle: trajectory vector over first 10-15 ft (negative playing towards right gutter)
         val launchAngleDeg = calculateLaunchAngle(sorted, 0.0, 15.0)
 
-        // Impact Angle: attack angle into the pocket over final 5-7 ft (53 to 60 ft)
-        val impactAngleDeg = calculateEntryAngle(sorted, 53.0, 59.5)
+        // Impact Angle & Strike Probability via PocketAnalyzer (53 to 60 ft)
+        val pocketPts = sorted.filter { it.yFt in 53.0..60.5 }.map { Point2D(it.xBoard, it.yFt) }
+        val pocketTelemetry = PocketAnalyzer().evaluatePocketImpact(pocketPts)
+        val impactAngleDeg = pocketTelemetry?.entryAngleDegrees ?: calculateEntryAngle(sorted, 53.0, 59.5)
+        val strikeProb = pocketTelemetry?.strikeProbabilityPercent ?: 0.0
 
         // Breakpoint Angle: directional inflection at hook apex
         val breakpointAngleDeg = calculateBreakpointAngle(sorted, breakpointDistanceFt)
@@ -76,7 +80,8 @@ object TelemetryExtractor {
         val angles = SpectoAngleMetrics(
             launchAngleDeg = round1(launchAngleDeg),
             breakpointAngleDeg = round1(breakpointAngleDeg),
-            impactAngleDeg = round1(impactAngleDeg)
+            impactAngleDeg = round1(impactAngleDeg),
+            strikeProbabilityPercent = round1(strikeProb)
         )
 
         // 3. SPEED & VELOCITY DECAY
@@ -390,7 +395,8 @@ object TelemetryExtractor {
             angles = SpectoAngleMetrics(
                 launchAngleDeg = -2.9,
                 breakpointAngleDeg = 8.5,
-                impactAngleDeg = 5.6
+                impactAngleDeg = 5.6,
+                strikeProbabilityPercent = 88.5
             ),
             speed = SpectoSpeedMetrics(
                 launchSpeedMph = 17.5,
