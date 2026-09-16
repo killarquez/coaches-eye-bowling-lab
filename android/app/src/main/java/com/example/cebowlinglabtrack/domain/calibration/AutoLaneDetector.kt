@@ -54,7 +54,7 @@ class AutoLaneDetector(
             viewWidth = width.toFloat(),
             viewHeight = height.toFloat(),
             zoomRatio = zoomRatio,
-            anchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS,
+            anchorMode = CalibrationAnchorMode.PIN_DECK,
             alignment = alignment
         )
         val defaultCalib = defaultCalibPair.first

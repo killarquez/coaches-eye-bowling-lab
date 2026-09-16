@@ -18,6 +18,15 @@ data class GutterChevron(
 )
 
 /**
+ * Range finder visual hash mark geometry projected onto screen pixels (37 ft to 43 ft).
+ */
+data class RangeFinder(
+    val start: Point2D,
+    val end: Point2D,
+    val board: Double
+)
+
+/**
  * Lane guide line geometry projected onto screen pixel coordinates.
  */
 data class ProjectedLaneGuides(
@@ -25,8 +34,11 @@ data class ProjectedLaneGuides(
     val leftGutterLine: List<Point2D>,
     val rightGutterLine: List<Point2D>,
     val centerline: List<Point2D>,
+    val indicatorDots: List<Point2D> = emptyList(),
     val arrowsLine: Pair<Point2D, Point2D>,
     val arrowPoints: List<Point2D>,
+    val arrowChevrons: List<GutterChevron> = emptyList(),
+    val rangeFinders: List<RangeFinder> = emptyList(),
     val headpinPoint: Point2D,
     val pinDeckLine: Pair<Point2D, Point2D>,
     val leftGutterChevrons: List<GutterChevron> = emptyList(),
@@ -38,9 +50,9 @@ data class ProjectedLaneGuides(
  * Reference calibration anchor modes for lane homography.
  */
 enum class CalibrationAnchorMode(val displayName: String) {
+    PIN_DECK("FULL LANE (0 & 60 FT)"),
     GUTTERS_AT_ARROWS("GUTTERS (0 & 15 FT)"),
-    ARROW_MARKERS("ARROWS (B5 & B35)"),
-    PIN_DECK("PIN DECK (0 & 60 FT)")
+    ARROW_MARKERS("ARROWS (B5 & B35)")
 }
 
 /**
@@ -180,16 +192,48 @@ class LaneCalibrator {
             homography.forward(LanePoint(20.0, 60.0))
         )
 
-        // 7 Targeting Arrows at 15 ft (Boards 5, 10, 15, 20, 25, 30, 35)
-        val arrowBoards = listOf(5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0)
-        val arrowPoints = arrowBoards.map { b ->
-            homography.forward(LanePoint(b, LaneConstants.ARROWS_DISTANCE_FT))
+        // 1. Indicator Dots at 7.5 ft (USBC spec: boards 3, 5, 8, 11, 14, 26, 29, 32, 35, 37)
+        val dotBoards = listOf(3.0, 5.0, 8.0, 11.0, 14.0, 26.0, 29.0, 32.0, 35.0, 37.0)
+        val indicatorDots = dotBoards.map { b ->
+            homography.forward(LanePoint(b, 7.5))
+        }
+
+        // 2. 7 Targeting Arrows at 12 to 15 ft (forward chevron pattern)
+        val arrowPositions = listOf(
+            Pair(5.0, 12.0),
+            Pair(10.0, 13.0),
+            Pair(15.0, 14.0),
+            Pair(20.0, 15.0),
+            Pair(25.0, 14.0),
+            Pair(30.0, 13.0),
+            Pair(35.0, 12.0)
+        )
+        val arrowPoints = arrowPositions.map { (b, d) ->
+            homography.forward(LanePoint(b, d))
+        }
+        val arrowChevrons = arrowPositions.map { (b, d) ->
+            GutterChevron(
+                tip = homography.forward(LanePoint(b, d + 0.8)),
+                leftWing = homography.forward(LanePoint(b - 0.6, d - 0.2)),
+                rightWing = homography.forward(LanePoint(b + 0.6, d - 0.2)),
+                distanceFt = d
+            )
         }
 
         val arrowsLine = Pair(
             homography.forward(LanePoint(1.0, LaneConstants.ARROWS_DISTANCE_FT)),
             homography.forward(LanePoint(39.0, LaneConstants.ARROWS_DISTANCE_FT))
         )
+
+        // 3. Range Finders from 37 ft to 43 ft (Boards 10, 15, 25, 30)
+        val rangeFinderBoards = listOf(10.0, 15.0, 25.0, 30.0)
+        val rangeFinders = rangeFinderBoards.map { b ->
+            RangeFinder(
+                start = homography.forward(LanePoint(b, 37.0)),
+                end = homography.forward(LanePoint(b, 43.0)),
+                board = b
+            )
+        }
 
         // Headpin (Board 20, 60 ft)
         val headpin = homography.forward(LanePoint(20.0, LaneConstants.FOUL_LINE_TO_HEADPIN_FT))
@@ -229,8 +273,11 @@ class LaneCalibrator {
             leftGutterLine = leftGutter,
             rightGutterLine = rightGutter,
             centerline = center,
+            indicatorDots = indicatorDots,
             arrowsLine = arrowsLine,
             arrowPoints = arrowPoints,
+            arrowChevrons = arrowChevrons,
+            rangeFinders = rangeFinders,
             headpinPoint = headpin,
             pinDeckLine = pinDeckLine,
             leftGutterChevrons = leftChevrons,
@@ -248,52 +295,77 @@ class LaneCalibrator {
         viewWidth: Float,
         viewHeight: Float,
         zoomRatio: Float = 1.0f,
-        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS,
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK,
         alignment: Handedness = Handedness.RIGHT
     ): Pair<LaneCalibration, HomographyMatrix> {
+        val zoomFactor = (zoomRatio - 1.0f).coerceIn(0f, 2.5f)
+
         // Perspective mapping for standard bowling alley view from approach
         val foulY = if (zoomRatio >= 2.0f) {
-            viewHeight * (0.76f + 0.04f * (zoomRatio - 2.0f).coerceAtMost(2.0f))
+            viewHeight * (0.80f + 0.03f * (zoomRatio - 2.0f).coerceAtMost(2.0f))
         } else {
-            viewHeight * (0.58f + 0.18f * (zoomRatio - 1.0f))
-        }
-        val arrowsY = if (zoomRatio >= 2.0f) {
-            viewHeight * (0.46f + 0.02f * (zoomRatio - 2.0f).coerceAtMost(2.0f))
-        } else {
-            viewHeight * (0.42f + 0.04f * (zoomRatio - 1.0f))
+            viewHeight * (0.64f + 0.16f * (zoomRatio - 1.0f))
         }
 
-        val (foulLeft, foulRight, arrowsLeft, arrowsRight) = when (alignment) {
+        val topAnchorY = if (anchorMode == CalibrationAnchorMode.PIN_DECK) {
+            // Pin deck at 60 ft near the top of the frame
+            if (zoomRatio >= 2.0f) viewHeight * 0.22f else viewHeight * 0.28f
+        } else {
+            // Arrows at 15 ft near the middle
+            if (zoomRatio >= 2.0f) viewHeight * 0.48f else viewHeight * 0.42f
+        }
+
+        val (foulLeft, foulRight, topAnchorLeft, topAnchorRight) = when (alignment) {
             Handedness.RIGHT -> {
                 // Camera aligned with RIGHT gutter (board 39):
                 // Right gutter runs almost vertical near the right third
                 // Left gutter diverges outwards to the left toward the foul line
-                val zoomFactor = (zoomRatio - 1.0f).coerceIn(0f, 1.5f)
-                val rFoulX = viewWidth * (0.80f + 0.08f * zoomFactor).coerceAtMost(0.95f)
-                val rArrowsX = viewWidth * (0.73f + 0.04f * zoomFactor).coerceAtMost(0.85f)
-                val lFoulX = viewWidth * (0.16f - 0.08f * zoomFactor).coerceAtLeast(0.05f)
-                val lArrowsX = viewWidth * (0.38f - 0.04f * zoomFactor).coerceAtLeast(0.15f)
+                val rFoulX = viewWidth * (0.82f + 0.06f * zoomFactor).coerceAtMost(0.96f)
+                val lFoulX = viewWidth * (0.16f - 0.06f * zoomFactor).coerceAtLeast(0.04f)
+
+                val (lTopX, rTopX) = if (anchorMode == CalibrationAnchorMode.PIN_DECK) {
+                    Pair(
+                        viewWidth * (0.34f - 0.04f * zoomFactor).coerceAtLeast(0.12f),
+                        viewWidth * (0.70f + 0.02f * zoomFactor).coerceAtMost(0.88f)
+                    )
+                } else {
+                    Pair(
+                        viewWidth * (0.38f - 0.04f * zoomFactor).coerceAtLeast(0.15f),
+                        viewWidth * (0.73f + 0.04f * zoomFactor).coerceAtMost(0.85f)
+                    )
+                }
+
                 listOf(
                     Point2D(lFoulX.toDouble(), foulY.toDouble()),
                     Point2D(rFoulX.toDouble(), foulY.toDouble()),
-                    Point2D(lArrowsX.toDouble(), arrowsY.toDouble()),
-                    Point2D(rArrowsX.toDouble(), arrowsY.toDouble())
+                    Point2D(lTopX.toDouble(), topAnchorY.toDouble()),
+                    Point2D(rTopX.toDouble(), topAnchorY.toDouble())
                 )
             }
             Handedness.LEFT -> {
                 // Camera aligned with LEFT gutter (board 1):
                 // Left gutter runs almost vertical near the left third
                 // Right gutter diverges outwards to the right toward the foul line
-                val zoomFactor = (zoomRatio - 1.0f).coerceIn(0f, 1.5f)
-                val lFoulX = viewWidth * (0.20f - 0.08f * zoomFactor).coerceAtLeast(0.05f)
-                val lArrowsX = viewWidth * (0.27f - 0.04f * zoomFactor).coerceAtLeast(0.15f)
-                val rFoulX = viewWidth * (0.84f + 0.08f * zoomFactor).coerceAtMost(0.95f)
-                val rArrowsX = viewWidth * (0.62f + 0.04f * zoomFactor).coerceAtMost(0.85f)
+                val lFoulX = viewWidth * (0.18f - 0.06f * zoomFactor).coerceAtLeast(0.04f)
+                val rFoulX = viewWidth * (0.84f + 0.06f * zoomFactor).coerceAtMost(0.96f)
+
+                val (lTopX, rTopX) = if (anchorMode == CalibrationAnchorMode.PIN_DECK) {
+                    Pair(
+                        viewWidth * (0.30f - 0.02f * zoomFactor).coerceAtLeast(0.12f),
+                        viewWidth * (0.66f + 0.04f * zoomFactor).coerceAtMost(0.88f)
+                    )
+                } else {
+                    Pair(
+                        viewWidth * (0.27f - 0.04f * zoomFactor).coerceAtLeast(0.15f),
+                        viewWidth * (0.62f + 0.04f * zoomFactor).coerceAtMost(0.85f)
+                    )
+                }
+
                 listOf(
                     Point2D(lFoulX.toDouble(), foulY.toDouble()),
                     Point2D(rFoulX.toDouble(), foulY.toDouble()),
-                    Point2D(lArrowsX.toDouble(), arrowsY.toDouble()),
-                    Point2D(rArrowsX.toDouble(), arrowsY.toDouble())
+                    Point2D(lTopX.toDouble(), topAnchorY.toDouble()),
+                    Point2D(rTopX.toDouble(), topAnchorY.toDouble())
                 )
             }
         }
@@ -301,8 +373,8 @@ class LaneCalibrator {
         return calibrate(
             foulLineLeft = foulLeft,
             foulLineRight = foulRight,
-            arrowsLeft = arrowsLeft,
-            arrowsRight = arrowsRight,
+            arrowsLeft = topAnchorLeft,
+            arrowsRight = topAnchorRight,
             anchorMode = anchorMode,
             calibrationZoomRatio = zoomRatio
         ) ?: run {
@@ -312,8 +384,8 @@ class LaneCalibrator {
                     id = UUID.randomUUID().toString(),
                     foulLineLeftScreen = foulLeft,
                     foulLineRightScreen = foulRight,
-                    arrowsLeftScreen = arrowsLeft,
-                    arrowsRightScreen = arrowsRight,
+                    arrowsLeftScreen = topAnchorLeft,
+                    arrowsRightScreen = topAnchorRight,
                     homographyMatrixElements = id.elements,
                     calibrationZoomRatio = zoomRatio,
                     anchorMode = anchorMode.name

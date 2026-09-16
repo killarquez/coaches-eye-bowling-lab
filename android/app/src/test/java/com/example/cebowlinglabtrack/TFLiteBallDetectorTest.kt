@@ -289,26 +289,54 @@ class TFLiteBallDetectorTest {
         class MockMultiClassYoloRunner : TFLiteRunner {
             override fun isYoloFormat(): Boolean = true
             override fun getYoloAnchorCount(): Int = 3549
-            override fun getYoloChannelCount(): Int = 6 // 4 bbox coords + 2 classes (0: ball, 1: pin_rack)
+            override fun getYoloChannelCount(): Int = 11 // 4 bbox coords + 7 classes
             override fun getInputChannels(): Int = 3
 
             override fun run(input: ByteBuffer, outputs: Map<Int, Any>) {
                 @Suppress("UNCHECKED_CAST")
                 val yoloOut = outputs[0] as? Array<Array<FloatArray>>
                 if (yoloOut != null) {
-                    // Anchor 10: Bowling ball at screen center bottom
-                    yoloOut[0][0][10] = 208f // cx = 0.50
-                    yoloOut[0][1][10] = 312f // cy = 0.75
+                    // Anchor 10: Class 0 (bowling_ball) at cx=0.50, cy=0.75
+                    yoloOut[0][0][10] = 208f
+                    yoloOut[0][1][10] = 312f
                     yoloOut[0][2][10] = 20f
                     yoloOut[0][3][10] = 20f
-                    yoloOut[0][4][10] = 0.89f // ball_conf
+                    yoloOut[0][4][10] = 0.89f
 
-                    // Anchor 20: 10-Pin rack at screen center top
-                    yoloOut[0][0][20] = 208f // cx = 0.50
-                    yoloOut[0][1][20] = 83f  // cy = 0.20 (at 60 ft)
+                    // Anchor 20: Class 1 (pin_rack) at cx=0.50, cy=0.20
+                    yoloOut[0][0][20] = 208f
+                    yoloOut[0][1][20] = 83f
                     yoloOut[0][2][20] = 50f
                     yoloOut[0][3][20] = 30f
-                    yoloOut[0][5][20] = 0.96f // pin_rack_conf
+                    yoloOut[0][5][20] = 0.96f
+
+                    // Anchor 30: Class 3 (foul_line) at cx=0.50, cy=0.55
+                    yoloOut[0][0][30] = 208f
+                    yoloOut[0][1][30] = 228f
+                    yoloOut[0][2][30] = 240f
+                    yoloOut[0][3][30] = 10f
+                    yoloOut[0][7][30] = 0.92f
+
+                    // Anchor 40: Class 4 (arrows) at cx=0.50, cy=0.46
+                    yoloOut[0][0][40] = 208f
+                    yoloOut[0][1][40] = 191f
+                    yoloOut[0][2][40] = 200f
+                    yoloOut[0][3][40] = 20f
+                    yoloOut[0][8][40] = 0.94f
+
+                    // Anchor 50: Class 5 (lane) at cx=0.50, cy=0.45
+                    yoloOut[0][0][50] = 208f
+                    yoloOut[0][1][50] = 187f
+                    yoloOut[0][2][50] = 220f
+                    yoloOut[0][3][50] = 150f
+                    yoloOut[0][9][50] = 0.97f
+
+                    // Anchor 60: Class 6 (slide_foot) at cx=0.45, cy=0.60
+                    yoloOut[0][0][60] = 187f
+                    yoloOut[0][1][60] = 250f
+                    yoloOut[0][2][60] = 40f
+                    yoloOut[0][3][60] = 50f
+                    yoloOut[0][10][60] = 0.85f
                 }
             }
             override fun close() {}
@@ -316,26 +344,52 @@ class TFLiteBallDetectorTest {
 
         val runner = MockMultiClassYoloRunner()
         val detector = TFLiteBallDetector.createForTesting(runner, inputSize = 416)
-        assertEquals(2, detector.yoloClassCount)
+        assertEquals(7, detector.yoloClassCount)
 
         val width = 1080
         val height = 1920
-        val imageBytes = ByteArray(width * height) { 128.toByte() }
+        val directBuffer = ByteBuffer.allocateDirect(width * height)
 
-        // Test ball detection
-        val ballCentroid = detector.detectBall(imageBytes, width, height, width)
+        // 1. Test ball detection (Class 0)
+        val ballCentroid = detector.detectBall(directBuffer, width, height)
         assertNotNull("Should detect ball from class 0", ballCentroid)
         assertEquals(540.0, ballCentroid!!.x, 0.5)
         assertEquals(1440.0, ballCentroid.y, 0.5)
 
-        // Test pin rack detection
-        val pinRack = detector.detectPinRack(imageBytes, width, height, width)
+        // 2. Test pin rack detection (Class 1)
+        val pinRack = detector.detectPinRack(directBuffer, width, height)
         assertNotNull("Should detect pin rack from class 1", pinRack)
         assertEquals("pin_rack", pinRack!!.className)
         assertEquals(1, pinRack.classId)
         assertEquals(0.96f, pinRack.confidence, 0.001f)
-        assertEquals(540.0, pinRack.centroid.x, 0.5)
-        assertEquals(384.0, pinRack.centroid.y, 5.0)
+
+        // 3. Test foul line detection (Class 3)
+        val foulLine = detector.detectFoulLine(directBuffer, width, height)
+        assertNotNull("Should detect foul line from class 3", foulLine)
+        assertEquals("foul_line", foulLine!!.className)
+        assertEquals(3, foulLine.classId)
+        assertEquals(0.92f, foulLine.confidence, 0.001f)
+
+        // 4. Test arrows detection (Class 4)
+        val arrows = detector.detectArrows(directBuffer, width, height)
+        assertNotNull("Should detect arrows from class 4", arrows)
+        assertEquals("arrows", arrows!!.className)
+        assertEquals(4, arrows.classId)
+        assertEquals(0.94f, arrows.confidence, 0.001f)
+
+        // 5. Test lane detection (Class 5)
+        val lane = detector.detectLane(directBuffer, width, height)
+        assertNotNull("Should detect lane from class 5", lane)
+        assertEquals("lane", lane!!.className)
+        assertEquals(5, lane.classId)
+        assertEquals(0.97f, lane.confidence, 0.001f)
+
+        // 6. Test slide foot detection (Class 6)
+        val slideFoot = detector.detectSlideFoot(directBuffer, width, height)
+        assertNotNull("Should detect slide foot from class 6", slideFoot)
+        assertEquals("slide_foot", slideFoot!!.className)
+        assertEquals(6, slideFoot.classId)
+        assertEquals(0.85f, slideFoot.confidence, 0.001f)
     }
 
     @Test

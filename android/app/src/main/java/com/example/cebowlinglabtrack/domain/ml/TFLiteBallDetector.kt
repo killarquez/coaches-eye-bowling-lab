@@ -520,6 +520,64 @@ class TFLiteBallDetector(
     }
 
     /**
+     * Direct [ByteBuffer] overload for detecting a specific visual landmark class (zero heap allocation).
+     */
+    fun detectLandmark(
+        yBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        classId: Int = 1
+    ): LandmarkDetection? {
+        if (!isYolo || classId >= yoloClassCount) return null
+
+        prepareInputFromByteBuffer(yBuffer, width, height)
+        inputTensorBuffer.rewind()
+        runner.run(inputTensorBuffer, outputsMap)
+
+        val anchors = yoloAnchorCount
+        val cxRow = yoloOutput[0][0]
+        val cyRow = yoloOutput[0][1]
+        val wRow = yoloOutput[0][2]
+        val hRow = yoloOutput[0][3]
+        val confRow = yoloOutput[0][4 + classId]
+
+        var bestIdx = -1
+        var bestScore = confidenceThreshold
+
+        for (i in 0 until anchors) {
+            val score = confRow[i]
+            if (score >= bestScore) {
+                bestScore = score
+                bestIdx = i
+            }
+        }
+
+        if (bestIdx < 0) return null
+
+        val normCx = cxRow[bestIdx] / inputSize.toDouble()
+        val normCy = cyRow[bestIdx] / inputSize.toDouble()
+        val normW = wRow[bestIdx] / inputSize.toDouble()
+        val normH = hRow[bestIdx] / inputSize.toDouble()
+
+        val xmin = (normCx - normW / 2.0).coerceIn(0.0, 1.0)
+        val ymin = (normCy - normH / 2.0).coerceIn(0.0, 1.0)
+        val xmax = (normCx + normW / 2.0).coerceIn(xmin, 1.0)
+        val ymax = (normCy + normH / 2.0).coerceIn(ymin, 1.0)
+
+        val u = normCx * width
+        val v = normCy * height
+        val className = DEFAULT_CLASS_LABELS.getOrElse(classId) { "class_$classId" }
+
+        return LandmarkDetection(
+            classId = classId,
+            className = className,
+            centroid = Point2D(u, v),
+            boundingBox = floatArrayOf(ymin.toFloat(), xmin.toFloat(), ymax.toFloat(), xmax.toFloat()),
+            confidence = bestScore
+        )
+    }
+
+    /**
      * Dedicated convenience detector for the 10-Pin Rack (Class 1).
      */
     fun detectPinRack(
@@ -528,6 +586,21 @@ class TFLiteBallDetector(
         height: Int,
         stride: Int = width
     ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 1)
+
+    fun detectPinRack(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
+        detectLandmark(yBuffer, width, height, classId = 1)
+
+    fun detectFoulLine(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
+        detectLandmark(yBuffer, width, height, classId = 3)
+
+    fun detectArrows(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
+        detectLandmark(yBuffer, width, height, classId = 4)
+
+    fun detectLane(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
+        detectLandmark(yBuffer, width, height, classId = 5)
+
+    fun detectSlideFoot(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
+        detectLandmark(yBuffer, width, height, classId = 6)
 
     override fun close() {
         runner.close()

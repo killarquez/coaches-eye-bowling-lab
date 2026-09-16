@@ -228,32 +228,7 @@ fun LiveTrackingScreen(
                         // Bottom-Right
                         drawLine(bracketColor, Offset(right, bottom), Offset(right - bracketLen, bottom), strokeWidth = 2.5f)
                         drawLine(bracketColor, Offset(right, bottom), Offset(right, bottom - bracketLen), strokeWidth = 2.5f)
-
-                        // Standing vs Fallen Pins
-                        pinScreenPts.forEachIndexed { idx, pinPos ->
-                            val pinNum = idx + 1
-                            val isStanding = state.standingPins.contains(pinNum)
-                            val center = Offset(pinPos.x.toFloat(), pinPos.y.toFloat())
-                            if (isStanding) {
-                                drawCircle(
-                                    color = Color.White.copy(alpha = 0.95f),
-                                    radius = 6.5f,
-                                    center = center
-                                )
-                                drawCircle(
-                                    color = NeonStrikeGreen,
-                                    radius = 3.5f,
-                                    center = center
-                                )
-                            } else {
-                                drawCircle(
-                                    color = Color.Gray.copy(alpha = 0.4f),
-                                    radius = 5.5f,
-                                    center = center,
-                                    style = Stroke(width = 1.5f)
-                                )
-                            }
-                        }
+                        // Physical pins sit cleanly inside the 60 ft pin rack corner brackets [  ]
                     }
                 }
 
@@ -968,8 +943,21 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawProjectedGuides
     drawPolyLine(guides.leftGutterLine, NeonCyan.copy(alpha = 0.7f))
     drawPolyLine(guides.rightGutterLine, NeonCyan.copy(alpha = 0.7f))
     drawPolyLine(guides.centerline, Color.White.copy(alpha = 0.25f))
+    // 3. Indicator Dots at 7.5 ft (USBC spec: boards 3, 5, 8, 11, 14, 26, 29, 32, 35, 37)
+    for (pt in guides.indicatorDots) {
+        drawCircle(
+            color = NeonCyan.copy(alpha = 0.85f),
+            radius = 3.5f,
+            center = Offset(pt.x.toFloat(), pt.y.toFloat())
+        )
+        drawCircle(
+            color = Color.White.copy(alpha = 0.95f),
+            radius = 1.8f,
+            center = Offset(pt.x.toFloat(), pt.y.toFloat())
+        )
+    }
 
-    // 3. Arrows line
+    // 4. Arrows Guide Line (15 ft)
     drawLine(
         color = NeonCyan.copy(alpha = 0.4f),
         start = Offset(guides.arrowsLine.first.x.toFloat(), guides.arrowsLine.first.y.toFloat()),
@@ -977,16 +965,44 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawProjectedGuides
         strokeWidth = 1.5f
     )
 
-    // 4. Arrow Dots
+    // 5. Targeting Arrow Chevrons at 12-15 ft (forward pointing ^ on boards 5, 10, 15, 20, 25, 30, 35)
+    for (ch in guides.arrowChevrons) {
+        drawLine(
+            color = ElectricAmber.copy(alpha = 0.95f),
+            start = Offset(ch.leftWing.x.toFloat(), ch.leftWing.y.toFloat()),
+            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
+            strokeWidth = 3f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = ElectricAmber.copy(alpha = 0.95f),
+            start = Offset(ch.rightWing.x.toFloat(), ch.rightWing.y.toFloat()),
+            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
+            strokeWidth = 3f,
+            cap = StrokeCap.Round
+        )
+    }
+    // Arrow marker dots
     for (pt in guides.arrowPoints) {
         drawCircle(
-            color = NeonCyan,
-            radius = 3.5f,
+            color = ElectricAmber,
+            radius = 3f,
             center = Offset(pt.x.toFloat(), pt.y.toFloat())
         )
     }
 
-    // 5. Headpin Dot
+    // 6. Range Finders from 37 ft to 43 ft (Boards 10, 15, 25, 30)
+    for (rf in guides.rangeFinders) {
+        drawLine(
+            color = NeonCyan.copy(alpha = 0.85f),
+            start = Offset(rf.start.x.toFloat(), rf.start.y.toFloat()),
+            end = Offset(rf.end.x.toFloat(), rf.end.y.toFloat()),
+            strokeWidth = 3f,
+            cap = StrokeCap.Round
+        )
+    }
+
+    // 7. Headpin Dot (60 ft, Board 20)
     drawCircle(
         color = PowerCoral,
         radius = 5f,
