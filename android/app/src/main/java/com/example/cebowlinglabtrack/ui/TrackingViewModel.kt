@@ -64,7 +64,11 @@ data class TrackingUiState(
     val tripodStatus: TripodAngleAdvisor.TripodStatus = TripodAngleAdvisor.TripodStatus(),
     val activeBowler: BowlerProfile? = null,
     val allBowlers: List<BowlerProfile> = emptyList(),
-    val isOpticalRevModeActive: Boolean = true
+    val isOpticalRevModeActive: Boolean = true,
+    val laneRecognitionStatus: String? = null,
+    val autoCenterGuidance: String? = null,
+    val pinRackDetected: Boolean = false,
+    val guttersDetected: Boolean = false
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -304,9 +308,24 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         height: Int,
         stride: Int = width
     ): Boolean {
+        val result = autoDetectLaneDetailed(imageBytes, width, height, stride)
+        return result.isSuccess
+    }
+
+    /**
+     * Executes autonomous lane recognition and auto-centering pipeline,
+     * returning detailed results for real-time coach feedback.
+     */
+    fun autoDetectLaneDetailed(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): AutoLaneDetector.AutoDetectionResult {
         updateViewportSize(width.toFloat(), height.toFloat())
         val currentZoom = _uiState.value.zoomRatio
         val result = autoLaneDetector.detectLaneFromFrame(imageBytes, width, height, stride, currentZoom)
+
         if (result.isSuccess) {
             val calib = result.calibration
             val newH = HomographyMatrix(calib.homographyMatrixElements.toDoubleArray())
@@ -324,15 +343,25 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 isLaneCalibrated = true,
                 calibrationQuality = "CALIBRATED (AUTO)",
                 projectedGuides = guides,
-                zoomRatio = result.optimalZoomRatio
+                zoomRatio = result.optimalZoomRatio,
+                laneRecognitionStatus = result.statusMessage,
+                autoCenterGuidance = result.autoCenterGuidance,
+                pinRackDetected = result.pinRackDetected,
+                guttersDetected = result.guttersDetected
             )
 
             viewModelScope.launch {
                 repository.saveCalibration(calib)
             }
-            return true
+        } else {
+            _uiState.value = _uiState.value.copy(
+                laneRecognitionStatus = result.statusMessage,
+                autoCenterGuidance = result.autoCenterGuidance,
+                pinRackDetected = result.pinRackDetected,
+                guttersDetected = result.guttersDetected
+            )
         }
-        return false
+        return result
     }
 
     /**

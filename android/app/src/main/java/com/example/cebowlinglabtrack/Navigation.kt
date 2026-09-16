@@ -152,8 +152,12 @@ fun MainNavigation(
                     CalibrationScreen(
                         currentCalibration = uiState.calibration,
                         zoomRatio = uiState.zoomRatio,
+                        autoCenterGuidance = uiState.autoCenterGuidance,
                         onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
                         onCalibrateDefault = { viewModel.calibrateWithDefaults() },
+                        onAutoDetectLaneDetailed = { bytes, w, h, s ->
+                            viewModel.autoDetectLaneDetailed(bytes, w, h, s)
+                        },
                         onAutoDetectLane = { bytes, w, h, s ->
                             viewModel.autoCalibrateFromFrame(bytes, w, h, s)
                         },

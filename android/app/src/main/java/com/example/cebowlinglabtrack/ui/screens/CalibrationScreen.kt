@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cebowlinglabtrack.camera.CameraPreviewView
+import com.example.cebowlinglabtrack.domain.calibration.AutoLaneDetector
 import com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode
 import com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix
 import com.example.cebowlinglabtrack.domain.calibration.LaneCalibrator
@@ -68,11 +69,14 @@ import com.example.cebowlinglabtrack.theme.ElectricAmber
 import com.example.cebowlinglabtrack.theme.GutterChevronCyan
 import com.example.cebowlinglabtrack.theme.NeonCyan
 import com.example.cebowlinglabtrack.theme.NeonStrikeGreen
+import com.example.cebowlinglabtrack.theme.PowerCoral
 import com.example.cebowlinglabtrack.theme.TextMuted
 import com.example.cebowlinglabtrack.theme.TextPrimary
 import com.example.cebowlinglabtrack.theme.TextSecondary
 import com.example.cebowlinglabtrack.theme.UsbcGold
+import com.example.cebowlinglabtrack.theme.UsbcNavyDark
 import com.example.cebowlinglabtrack.theme.UsbcNavyLight
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
@@ -84,14 +88,18 @@ import kotlin.math.sqrt
 fun CalibrationScreen(
     currentCalibration: LaneCalibration?,
     zoomRatio: Float = 1.0f,
+    autoCenterGuidance: String? = null,
     onZoomChange: (Float) -> Unit = {},
     onSaveCalibration: (Point2D, Point2D, Point2D, Point2D, CalibrationAnchorMode) -> Unit,
+    onAutoDetectLaneDetailed: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int) -> AutoLaneDetector.AutoDetectionResult)? = null,
     onAutoDetectLane: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int) -> Boolean)? = null,
     onCalibrateDefault: (() -> Unit)? = null,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val calibrator = remember { LaneCalibrator() }
+    var currentGuidance by remember { mutableStateOf(autoCenterGuidance) }
+    LaunchedEffect(autoCenterGuidance) { currentGuidance = autoCenterGuidance }
 
     var anchorMode by remember {
         mutableStateOf(
@@ -563,20 +571,54 @@ fun CalibrationScreen(
                 }
             }
 
-            // Auto-detect status banner if triggered
-            autoDetectionStatus?.let { status ->
+            // Auto-Center & Lane Alignment Guidance Chip (Top Center)
+            val activeGuidance = currentGuidance ?: autoCenterGuidance
+            activeGuidance?.let { guidance ->
+                val isCentered = guidance.contains("CENTERED")
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 10.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(DarkSurface.copy(alpha = 0.92f))
-                        .border(1.dp, NeonCyan, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isCentered) UsbcNavyDark.copy(alpha = 0.94f) else DarkSurface.copy(alpha = 0.94f))
+                        .border(1.5.dp, if (isCentered) NeonStrikeGreen else ElectricAmber, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = guidance,
+                        color = if (isCentered) NeonStrikeGreen else ElectricAmber,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+
+            // Auto-detect status banner if triggered (Bottom of Viewfinder)
+            autoDetectionStatus?.let { status ->
+                val isSuccess = status.startsWith("✓")
+                val isError = status.contains("NO PIN RACK") || status.contains("UNCLEAR") || status.startsWith("❌")
+                val bannerBorder = when {
+                    isSuccess -> NeonStrikeGreen
+                    isError -> PowerCoral
+                    else -> NeonCyan
+                }
+                val bannerText = when {
+                    isSuccess -> NeonStrikeGreen
+                    isError -> PowerCoral
+                    else -> NeonCyan
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 75.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DarkSurface.copy(alpha = 0.95f))
+                        .border(1.dp, bannerBorder, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Text(
                         text = status,
-                        color = NeonCyan,
+                        color = bannerText,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -595,22 +637,41 @@ fun CalibrationScreen(
             Button(
                 onClick = {
                     val frame = latestFrameBytes
-                    if (frame != null && onAutoDetectLane != null) {
-                        val success = onAutoDetectLane(frame, frameWidth, frameHeight, frameStride)
-                        if (success) {
-                            currentCalibration?.let {
-                                flX = it.foulLineLeftScreen.x.toFloat()
-                                flY = it.foulLineLeftScreen.y.toFloat()
-                                frX = it.foulLineRightScreen.x.toFloat()
-                                frY = it.foulLineRightScreen.y.toFloat()
-                                alX = it.arrowsLeftScreen.x.toFloat()
-                                alY = it.arrowsLeftScreen.y.toFloat()
-                                arX = it.arrowsRightScreen.x.toFloat()
-                                arY = it.arrowsRightScreen.y.toFloat()
+                    if (frame != null) {
+                        if (onAutoDetectLaneDetailed != null) {
+                            val res = onAutoDetectLaneDetailed(frame, frameWidth, frameHeight, frameStride)
+                            autoDetectionStatus = res.statusMessage
+                            currentGuidance = res.autoCenterGuidance
+                            if (res.isSuccess) {
+                                flX = res.foulLineLeft.x.toFloat()
+                                flY = res.foulLineLeft.y.toFloat()
+                                frX = res.foulLineRight.x.toFloat()
+                                frY = res.foulLineRight.y.toFloat()
+                                alX = res.arrowsLeft.x.toFloat()
+                                alY = res.arrowsLeft.y.toFloat()
+                                arX = res.arrowsRight.x.toFloat()
+                                arY = res.arrowsRight.y.toFloat()
+                                if (abs(res.optimalZoomRatio - zoomRatio) > 0.15f) {
+                                    onZoomChange(res.optimalZoomRatio)
+                                }
                             }
-                            autoDetectionStatus = "✓ LANE AUTO-DETECTED & SNAPPED"
-                        } else {
-                            autoDetectionStatus = "FINE-TUNE ANCHORS TO PHYSICAL GUTTERS"
+                        } else if (onAutoDetectLane != null) {
+                            val success = onAutoDetectLane(frame, frameWidth, frameHeight, frameStride)
+                            if (success) {
+                                currentCalibration?.let {
+                                    flX = it.foulLineLeftScreen.x.toFloat()
+                                    flY = it.foulLineLeftScreen.y.toFloat()
+                                    frX = it.foulLineRightScreen.x.toFloat()
+                                    frY = it.foulLineRightScreen.y.toFloat()
+                                    alX = it.arrowsLeftScreen.x.toFloat()
+                                    alY = it.arrowsLeftScreen.y.toFloat()
+                                    arX = it.arrowsRightScreen.x.toFloat()
+                                    arY = it.arrowsRightScreen.y.toFloat()
+                                }
+                                autoDetectionStatus = "✓ LANE AUTO-DETECTED & SNAPPED"
+                            } else {
+                                autoDetectionStatus = "❌ NO PIN RACK DETECTED - AIM AT PINS"
+                            }
                         }
                     } else {
                         autoDetectionStatus = "POINT CAMERA AT LANE TO AUTO-DETECT"

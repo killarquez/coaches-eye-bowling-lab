@@ -1,6 +1,7 @@
 package com.example.cebowlinglabtrack
 
 import com.example.cebowlinglabtrack.domain.calibration.AutoLaneDetector
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,35 +9,43 @@ import org.junit.Test
 class AutoLaneDetectorTest {
 
     @Test
-    fun testAutoLaneDetectionWithSyntheticGutters() {
+    fun testRejectNonBowlingRoomEnvironment() {
         val detector = AutoLaneDetector()
         val width = 800
         val height = 1200
         val stride = width
-        val imageBytes = ByteArray(width * height)
+        val roomImageBytes = ByteArray(width * height)
 
-        // Generate synthetic bowling lane:
-        // - Dark gutters on edges (luminance ~ 30)
-        // - Bright polished lane in center (luminance ~ 180)
-        // Perspective convergence: lane is wider at bottom, narrower at top
-        for (y in 0 until height) {
-            val progress = y.toDouble() / height // 0 at top, 1 at bottom
-            val laneHalfWidth = 100 + (progress * 220) // 100px at top, 320px at bottom
-            val centerX = width / 2
-
-            val leftGutterEdge = (centerX - laneHalfWidth).toInt()
-            val rightGutterEdge = (centerX + laneHalfWidth).toInt()
-
-            for (x in 0 until width) {
-                val isLane = x in leftGutterEdge..rightGutterEdge
-                imageBytes[y * stride + x] = if (isLane) 180.toByte() else 30.toByte()
-            }
+        // Simulate non-bowling bedroom/office frame:
+        // Moderately lit room wall/floor with diffuse illumination (lum ~ 130)
+        // and minor texture noise without high-contrast pin deck or gutters
+        for (i in roomImageBytes.indices) {
+            roomImageBytes[i] = (120 + (i % 25)).toByte()
         }
+
+        val result = detector.detectLaneFromFrame(roomImageBytes, width, height, stride)
+
+        assertNotNull("Detection result should not be null", result)
+        assertFalse("Auto-detection MUST FAIL in a bedroom/office without pins", result.isSuccess)
+        assertFalse("Pin rack must NOT be detected in non-bowling environment", result.pinRackDetected)
+        assertTrue("Status message should warn about no pin rack",
+            result.statusMessage.contains("NO PIN RACK"))
+    }
+
+    @Test
+    fun testAutoLaneDetectionWithFullPinRackAndGutters() {
+        val detector = AutoLaneDetector()
+        val width = 800
+        val height = 1200
+        val stride = width
+        val imageBytes = createSyntheticLaneFrame(width, height, pinRackCenterX = 400.0, includePins = true)
 
         val result = detector.detectLaneFromFrame(imageBytes, width, height, stride)
 
         assertNotNull("Detection result should not be null", result)
-        assertTrue("Detection should succeed on clear synthetic lane", result.isSuccess)
+        assertTrue("Detection should succeed on lane with full pin rack", result.isSuccess)
+        assertTrue("Pin rack must be detected", result.pinRackDetected)
+        assertTrue("Gutters must be detected", result.guttersDetected)
         assertTrue("Confidence should be high (> 0.8)", result.confidence >= 0.8)
 
         // Check geometry: foul line (bottom) should be wider than arrows (mid)
@@ -44,8 +53,31 @@ class AutoLaneDetectorTest {
         val arrowWidth = result.arrowsRight.x - result.arrowsLeft.x
         assertTrue("Foul line must be wider than arrows due to perspective", foulWidth > arrowWidth)
 
+        // Check auto-center guidance
+        assertEquals("🟢 LANE CENTERED", result.autoCenterGuidance)
+
         // Check that homography matrix elements are valid 3x3
         assertEquals(9, result.calibration.homographyMatrixElements.size)
+    }
+
+    @Test
+    fun testAutoCenterGuidancePanRightAndPanLeft() {
+        val detector = AutoLaneDetector()
+        val width = 800
+        val height = 1200
+        val stride = width
+
+        // Frame with pin rack shifted right (pins at X = 550, center is 400 -> coach should pan right)
+        val imageShiftedRight = createSyntheticLaneFrame(width, height, pinRackCenterX = 550.0, includePins = true)
+        val resultRight = detector.detectLaneFromFrame(imageShiftedRight, width, height, stride)
+        assertTrue("Pin rack must be detected when shifted right", resultRight.pinRackDetected)
+        assertTrue("Guidance should prompt panning right", resultRight.autoCenterGuidance?.contains("PAN RIGHT") == true)
+
+        // Frame with pin rack shifted left (pins at X = 250, center is 400 -> coach should pan left)
+        val imageShiftedLeft = createSyntheticLaneFrame(width, height, pinRackCenterX = 250.0, includePins = true)
+        val resultLeft = detector.detectLaneFromFrame(imageShiftedLeft, width, height, stride)
+        assertTrue("Pin rack must be detected when shifted left", resultLeft.pinRackDetected)
+        assertTrue("Guidance should prompt panning left", resultLeft.autoCenterGuidance?.contains("PAN LEFT") == true)
     }
 
     @Test
@@ -135,7 +167,62 @@ class AutoLaneDetectorTest {
         assertTrue("Lane width at foul line should be wider when zoomed in", width25x > width1x)
     }
 
-    private fun assertEquals(expected: Int, actual: Int) {
+    private fun createSyntheticLaneFrame(
+        width: Int,
+        height: Int,
+        pinRackCenterX: Double = width / 2.0,
+        includePins: Boolean = true
+    ): ByteArray {
+        val stride = width
+        val imageBytes = ByteArray(width * height)
+
+        val pinDeckY = (height * 0.32).toInt()
+        val foulY = (height * 0.65).toInt()
+
+        for (y in 0 until height) {
+            val rowOffset = y * stride
+            when {
+                y < pinDeckY - 20 -> {
+                    // Wall / curtain above pins
+                    for (x in 0 until width) imageBytes[rowOffset + x] = 35.toByte()
+                }
+                y in (pinDeckY - 20)..pinDeckY -> {
+                    // Pin deck pit region: dark cushion with white pin reflections
+                    val halfW = 35.0
+                    val leftEdge = (pinRackCenterX - halfW).toInt()
+                    val rightEdge = (pinRackCenterX + halfW).toInt()
+                    for (x in 0 until width) {
+                        if (includePins && y in (pinDeckY - 14)..(pinDeckY - 2) && x in leftEdge..rightEdge) {
+                            // 4 pin reflection peaks across width on illuminated pin deck
+                            val relX = x - leftEdge
+                            val isPinPeak = (relX in 8..13 || relX in 24..29 || relX in 40..45 || relX in 56..61)
+                            imageBytes[rowOffset + x] = if (isPinPeak) 240.toByte() else 140.toByte()
+                        } else {
+                            imageBytes[rowOffset + x] = 35.toByte() // Dark pit cushion
+                        }
+                    }
+                }
+                y in (pinDeckY + 1)..foulY -> {
+                    // Lane surface between gutters
+                    val progress = (y - pinDeckY).toDouble() / (foulY - pinDeckY)
+                    val laneHalfWidth = 35.0 + progress * 165.0 // Diverges from 35 to 200px
+                    val leftGutter = (pinRackCenterX - laneHalfWidth).toInt()
+                    val rightGutter = (pinRackCenterX + laneHalfWidth).toInt()
+
+                    for (x in 0 until width) {
+                        imageBytes[rowOffset + x] = if (x in leftGutter..rightGutter) 180.toByte() else 35.toByte()
+                    }
+                }
+                else -> {
+                    // Approach behind foul line
+                    for (x in 0 until width) imageBytes[rowOffset + x] = 110.toByte()
+                }
+            }
+        }
+        return imageBytes
+    }
+
+    private fun assertEquals(expected: Any?, actual: Any?) {
         org.junit.Assert.assertEquals(expected, actual)
     }
 }
