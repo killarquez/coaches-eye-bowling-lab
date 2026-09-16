@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -84,7 +85,6 @@ import com.example.cebowlinglabtrack.theme.UsbcNavyLight
 import com.example.cebowlinglabtrack.theme.UsbcRed
 import com.example.cebowlinglabtrack.ui.TrackingUiState
 import com.example.cebowlinglabtrack.ui.components.LaneTraxReviewView
-import com.example.cebowlinglabtrack.ui.components.SkeletonOverlay
 import com.example.cebowlinglabtrack.ui.components.TelemetryHUDCard
 import com.example.cebowlinglabtrack.ui.components.TripodAdvisorOverlay
 
@@ -151,75 +151,178 @@ fun LiveTrackingScreen(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // 2. AR Overlays: Projected Lane Guides, 10-Pin Deck & In-Flight Ball Marker
+            // 2. AR Overlays: Cyan Lane Trapezoid, 10-Pin Rack Lock Box & In-Flight Ball Tracking Reticle
             Canvas(modifier = Modifier.fillMaxSize()) {
-                // Render AR projected lane guides over physical lane
+                val hElements = state.calibration?.homographyMatrixElements
+                val homography = if (hElements != null && hElements.size == 9) {
+                    com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix(hElements.toDoubleArray())
+                } else null
+
+                // 2A. Cyan Lane Surface Trapezoid Fill (Foul line to Pin Deck)
+                if (homography != null) {
+                    val pBL = homography.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(1.0, 0.0))
+                    val pBR = homography.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(39.0, 0.0))
+                    val pTR = homography.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(39.0, 60.0))
+                    val pTL = homography.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(1.0, 60.0))
+
+                    val laneTrapezoid = Path().apply {
+                        moveTo(pBL.x.toFloat(), pBL.y.toFloat())
+                        lineTo(pBR.x.toFloat(), pBR.y.toFloat())
+                        lineTo(pTR.x.toFloat(), pTR.y.toFloat())
+                        lineTo(pTL.x.toFloat(), pTL.y.toFloat())
+                        close()
+                    }
+                    // Subtle translucent cyan wash across physical lane
+                    drawPath(path = laneTrapezoid, color = Color(0x1200E5FF))
+                    // Subtle perimeter outline
+                    drawPath(
+                        path = laneTrapezoid,
+                        color = NeonCyan.copy(alpha = 0.35f),
+                        style = Stroke(width = 1.5f)
+                    )
+                }
+
+                // 2B. Projected Lane Guides (Foul line, arrows, targets, chevrons)
                 state.projectedGuides?.let { guides ->
                     drawProjectedGuides(guides)
                 }
 
-                // Render 10 Pins on Pin Deck (USBC coordinates)
-                val hElements = state.calibration?.homographyMatrixElements
-                if (hElements != null && hElements.size == 9) {
-                    val m = com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix(
-                        hElements.toDoubleArray()
-                    )
-                    PinDeckDetector.STANDARD_PIN_COORDS.forEachIndexed { idx, pinCoord ->
-                        val pinNum = idx + 1
-                        val pinPos = m.forward(pinCoord)
-                        val isStanding = state.standingPins.contains(pinNum)
+                // 2C. 10-Pin Rack AR Target Box [||||||||||] (Strike.app style bracket lock at 60 ft)
+                if (homography != null) {
+                    val pinScreenPts = PinDeckDetector.STANDARD_PIN_COORDS.map { homography.forward(it) }
+                    if (pinScreenPts.isNotEmpty()) {
+                        var minX = Float.MAX_VALUE
+                        var maxX = Float.MIN_VALUE
+                        var minY = Float.MAX_VALUE
+                        var maxY = Float.MIN_VALUE
 
-                        if (isStanding) {
-                            drawCircle(
-                                color = Color.White.copy(alpha = 0.95f),
-                                radius = 7f,
-                                center = Offset(pinPos.x.toFloat(), pinPos.y.toFloat())
-                            )
-                            drawCircle(
-                                color = NeonStrikeGreen,
-                                radius = 3.5f,
-                                center = Offset(pinPos.x.toFloat(), pinPos.y.toFloat())
-                            )
-                        } else {
-                            drawCircle(
-                                color = Color.Gray.copy(alpha = 0.4f),
-                                radius = 6f,
-                                center = Offset(pinPos.x.toFloat(), pinPos.y.toFloat()),
-                                style = Stroke(width = 1.5f)
-                            )
+                        for (pt in pinScreenPts) {
+                            val x = pt.x.toFloat()
+                            val y = pt.y.toFloat()
+                            if (x < minX) minX = x
+                            if (x > maxX) maxX = x
+                            if (y < minY) minY = y
+                            if (y > maxY) maxY = y
+                        }
+
+                        val padX = 14f
+                        val padY = 10f
+                        val left = minX - padX
+                        val right = maxX + padX
+                        val top = minY - padY
+                        val bottom = maxY + padY
+                        val bracketLen = 14f
+
+                        val bracketColor = if (state.standingPins.size == 10) Color.White else NeonCyan
+
+                        // High-tech corner brackets [  ] around 10-pin triangle
+                        // Top-Left
+                        drawLine(bracketColor, Offset(left, top), Offset(left + bracketLen, top), strokeWidth = 2.5f)
+                        drawLine(bracketColor, Offset(left, top), Offset(left, top + bracketLen), strokeWidth = 2.5f)
+                        // Top-Right
+                        drawLine(bracketColor, Offset(right, top), Offset(right - bracketLen, top), strokeWidth = 2.5f)
+                        drawLine(bracketColor, Offset(right, top), Offset(right, top + bracketLen), strokeWidth = 2.5f)
+                        // Bottom-Left
+                        drawLine(bracketColor, Offset(left, bottom), Offset(left + bracketLen, bottom), strokeWidth = 2.5f)
+                        drawLine(bracketColor, Offset(left, bottom), Offset(left, bottom - bracketLen), strokeWidth = 2.5f)
+                        // Bottom-Right
+                        drawLine(bracketColor, Offset(right, bottom), Offset(right - bracketLen, bottom), strokeWidth = 2.5f)
+                        drawLine(bracketColor, Offset(right, bottom), Offset(right, bottom - bracketLen), strokeWidth = 2.5f)
+
+                        // Standing vs Fallen Pins
+                        pinScreenPts.forEachIndexed { idx, pinPos ->
+                            val pinNum = idx + 1
+                            val isStanding = state.standingPins.contains(pinNum)
+                            val center = Offset(pinPos.x.toFloat(), pinPos.y.toFloat())
+                            if (isStanding) {
+                                drawCircle(
+                                    color = Color.White.copy(alpha = 0.95f),
+                                    radius = 6.5f,
+                                    center = center
+                                )
+                                drawCircle(
+                                    color = NeonStrikeGreen,
+                                    radius = 3.5f,
+                                    center = center
+                                )
+                            } else {
+                                drawCircle(
+                                    color = Color.Gray.copy(alpha = 0.4f),
+                                    radius = 5.5f,
+                                    center = center,
+                                    style = Stroke(width = 1.5f)
+                                )
+                            }
                         }
                     }
                 }
 
-                // Render in-flight ball marker
-                if (state.liveTrajectory.isNotEmpty()) {
-                    val lastPt = state.liveTrajectory.last()
-                    if (hElements != null && hElements.size == 9) {
-                        val m = com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix(
-                            hElements.toDoubleArray()
-                        )
-                        val screenPt = m.forward(
-                            com.example.cebowlinglabtrack.domain.model.LanePoint(lastPt.xBoard, lastPt.yFt)
-                        )
-                        drawCircle(
-                            color = NeonStrikeGreen.copy(alpha = 0.4f),
-                            radius = 24f,
-                            center = Offset(screenPt.x.toFloat(), screenPt.y.toFloat())
-                        )
-                        drawCircle(
-                            color = NeonStrikeGreen,
-                            radius = 12f,
-                            center = Offset(screenPt.x.toFloat(), screenPt.y.toFloat())
-                        )
+                // 2D. Pro In-Flight Ball Tracking Reticle [ ● ] and Trajectory Trail
+                if (state.liveTrajectory.isNotEmpty() && homography != null) {
+                    // Glowing motion trajectory path
+                    if (state.liveTrajectory.size >= 2) {
+                        for (i in 0 until state.liveTrajectory.size - 1) {
+                            val p1 = homography.forward(
+                                com.example.cebowlinglabtrack.domain.model.LanePoint(
+                                    state.liveTrajectory[i].xBoard,
+                                    state.liveTrajectory[i].yFt
+                                )
+                            )
+                            val p2 = homography.forward(
+                                com.example.cebowlinglabtrack.domain.model.LanePoint(
+                                    state.liveTrajectory[i + 1].xBoard,
+                                    state.liveTrajectory[i + 1].yFt
+                                )
+                            )
+                            // Outer glow
+                            drawLine(
+                                color = NeonStrikeGreen.copy(alpha = 0.25f),
+                                start = Offset(p1.x.toFloat(), p1.y.toFloat()),
+                                end = Offset(p2.x.toFloat(), p2.y.toFloat()),
+                                strokeWidth = 7f,
+                                cap = StrokeCap.Round
+                            )
+                            // Core trajectory line
+                            drawLine(
+                                color = NeonStrikeGreen.copy(alpha = 0.90f),
+                                start = Offset(p1.x.toFloat(), p1.y.toFloat()),
+                                end = Offset(p2.x.toFloat(), p2.y.toFloat()),
+                                strokeWidth = 3f,
+                                cap = StrokeCap.Round
+                            )
+                        }
                     }
+
+                    // Pro Tracking Reticle around ball centroid
+                    val lastPt = state.liveTrajectory.last()
+                    val ballScreenPt = homography.forward(
+                        com.example.cebowlinglabtrack.domain.model.LanePoint(lastPt.xBoard, lastPt.yFt)
+                    )
+                    val bx = ballScreenPt.x.toFloat()
+                    val by = ballScreenPt.y.toFloat()
+                    val rRadius = 22f
+                    val bArm = 8f
+
+                    val rLeft = bx - rRadius
+                    val rRight = bx + rRadius
+                    val rTop = by - rRadius
+                    val rBottom = by + rRadius
+
+                    // Corner brackets [  ] around ball
+                    drawLine(NeonStrikeGreen, Offset(rLeft, rTop), Offset(rLeft + bArm, rTop), strokeWidth = 2.5f)
+                    drawLine(NeonStrikeGreen, Offset(rLeft, rTop), Offset(rLeft, rTop + bArm), strokeWidth = 2.5f)
+                    drawLine(NeonStrikeGreen, Offset(rRight, rTop), Offset(rRight - bArm, rTop), strokeWidth = 2.5f)
+                    drawLine(NeonStrikeGreen, Offset(rRight, rTop), Offset(rRight, rTop + bArm), strokeWidth = 2.5f)
+                    drawLine(NeonStrikeGreen, Offset(rLeft, rBottom), Offset(rLeft + bArm, rBottom), strokeWidth = 2.5f)
+                    drawLine(NeonStrikeGreen, Offset(rLeft, rBottom), Offset(rLeft, rBottom - bArm), strokeWidth = 2.5f)
+                    drawLine(NeonStrikeGreen, Offset(rRight, rBottom), Offset(rRight - bArm, rBottom), strokeWidth = 2.5f)
+                    drawLine(NeonStrikeGreen, Offset(rRight, rBottom), Offset(rRight, rBottom - bArm), strokeWidth = 2.5f)
+
+                    // Glowing center core
+                    drawCircle(color = NeonStrikeGreen.copy(alpha = 0.35f), radius = 10f, center = Offset(bx, by))
+                    drawCircle(color = NeonStrikeGreen, radius = 4f, center = Offset(bx, by))
                 }
             }
-
-            // 3. Real-time Bowler Skeletal Pose Overlay
-            SkeletonOverlay(
-                pose = state.livePose,
-                modifier = Modifier.fillMaxSize()
-            )
 
             // 4. Top Status Header & Tripod Alignment Advisor
             Column(
@@ -370,6 +473,33 @@ fun LiveTrackingScreen(
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold
                                 )
+                            }
+                        }
+
+                        // 10-Pin Deck Lock Status Chip (Strike.app style)
+                        if (state.isLaneCalibrated) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(UsbcNavyDark.copy(alpha = 0.85f))
+                                    .border(1.dp, NeonStrikeGreen.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 7.dp, vertical = 6.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "[||||||||||]",
+                                        color = NeonStrikeGreen,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${state.standingPins.size} PINS",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
 

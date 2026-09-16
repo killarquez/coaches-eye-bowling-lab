@@ -27,3 +27,4 @@ dataset/
 runs/
 weights/
 *.pt
+*.mp4

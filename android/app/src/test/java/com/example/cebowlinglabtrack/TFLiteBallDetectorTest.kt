@@ -285,6 +285,60 @@ class TFLiteBallDetectorTest {
     }
 
     @Test
+    fun testMultiClassYoloDetectionForPinRackAndBall() {
+        class MockMultiClassYoloRunner : TFLiteRunner {
+            override fun isYoloFormat(): Boolean = true
+            override fun getYoloAnchorCount(): Int = 3549
+            override fun getYoloChannelCount(): Int = 6 // 4 bbox coords + 2 classes (0: ball, 1: pin_rack)
+            override fun getInputChannels(): Int = 3
+
+            override fun run(input: ByteBuffer, outputs: Map<Int, Any>) {
+                @Suppress("UNCHECKED_CAST")
+                val yoloOut = outputs[0] as? Array<Array<FloatArray>>
+                if (yoloOut != null) {
+                    // Anchor 10: Bowling ball at screen center bottom
+                    yoloOut[0][0][10] = 208f // cx = 0.50
+                    yoloOut[0][1][10] = 312f // cy = 0.75
+                    yoloOut[0][2][10] = 20f
+                    yoloOut[0][3][10] = 20f
+                    yoloOut[0][4][10] = 0.89f // ball_conf
+
+                    // Anchor 20: 10-Pin rack at screen center top
+                    yoloOut[0][0][20] = 208f // cx = 0.50
+                    yoloOut[0][1][20] = 83f  // cy = 0.20 (at 60 ft)
+                    yoloOut[0][2][20] = 50f
+                    yoloOut[0][3][20] = 30f
+                    yoloOut[0][5][20] = 0.96f // pin_rack_conf
+                }
+            }
+            override fun close() {}
+        }
+
+        val runner = MockMultiClassYoloRunner()
+        val detector = TFLiteBallDetector.createForTesting(runner, inputSize = 416)
+        assertEquals(2, detector.yoloClassCount)
+
+        val width = 1080
+        val height = 1920
+        val imageBytes = ByteArray(width * height) { 128.toByte() }
+
+        // Test ball detection
+        val ballCentroid = detector.detectBall(imageBytes, width, height, width)
+        assertNotNull("Should detect ball from class 0", ballCentroid)
+        assertEquals(540.0, ballCentroid!!.x, 0.5)
+        assertEquals(1440.0, ballCentroid.y, 0.5)
+
+        // Test pin rack detection
+        val pinRack = detector.detectPinRack(imageBytes, width, height, width)
+        assertNotNull("Should detect pin rack from class 1", pinRack)
+        assertEquals("pin_rack", pinRack!!.className)
+        assertEquals(1, pinRack.classId)
+        assertEquals(0.96f, pinRack.confidence, 0.001f)
+        assertEquals(540.0, pinRack.centroid.x, 0.5)
+        assertEquals(384.0, pinRack.centroid.y, 5.0)
+    }
+
+    @Test
     fun testBowlingBallModelAssetFileIntegrity() {
         val modelFile = java.io.File("src/main/assets/models/bowling_ball_v1.tflite")
         assertTrue("TFLite model asset must exist in src/main/assets/models/", modelFile.exists())

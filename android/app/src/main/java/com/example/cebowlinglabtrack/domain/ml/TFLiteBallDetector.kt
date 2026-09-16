@@ -35,6 +35,16 @@ class TFLiteBallDetector(
         const val MAX_DETECTIONS = 10
         const val MODEL_ASSET_PATH = "models/bowling_ball_v1.tflite"
 
+        val DEFAULT_CLASS_LABELS = listOf(
+            "bowling_ball",
+            "pin_rack",
+            "pin",
+            "foul_line",
+            "arrows",
+            "lane",
+            "slide_foot"
+        )
+
         /**
          * Loads model file directly from Android APK assets as memory-mapped [ByteBuffer].
          */
@@ -124,6 +134,38 @@ class TFLiteBallDetector(
         }
     }
 
+    /**
+     * General landmark detection result payload (for pin rack, foul line, arrows, etc.).
+     */
+    data class LandmarkDetection(
+        val classId: Int,
+        val className: String,
+        val centroid: Point2D,
+        val boundingBox: FloatArray, // [ymin, xmin, ymax, xmax] normalized [0.0, 1.0]
+        val confidence: Float
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+            other as LandmarkDetection
+            if (classId != other.classId) return false
+            if (className != other.className) return false
+            if (centroid != other.centroid) return false
+            if (!boundingBox.contentEquals(other.boundingBox)) return false
+            if (confidence != other.confidence) return false
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = classId
+            result = 31 * result + className.hashCode()
+            result = 31 * result + centroid.hashCode()
+            result = 31 * result + boundingBox.contentHashCode()
+            result = 31 * result + confidence.hashCode()
+            return result
+        }
+    }
+
     // ========================================================================
     // Model Topology & Pre-allocated Hot-Path Buffers (Zero Allocations In Loop)
     // ========================================================================
@@ -131,6 +173,8 @@ class TFLiteBallDetector(
     private val inputChannels = runner.getInputChannels().coerceIn(1, 3)
     private val isYolo = runner.isYoloFormat()
     private val yoloAnchorCount = runner.getYoloAnchorCount().coerceAtLeast(1)
+    private val yoloChannelCount = runner.getYoloChannelCount().coerceAtLeast(5)
+    val yoloClassCount = (yoloChannelCount - 4).coerceAtLeast(1)
 
     // Direct input tensor buffer: shape [1, inputSize, inputSize, inputChannels]
     private val inputTensorBuffer: ByteBuffer = ByteBuffer.allocateDirect(
@@ -143,8 +187,8 @@ class TFLiteBallDetector(
     private val outputScores = Array(1) { FloatArray(MAX_DETECTIONS) }
     private val outputNumDetections = FloatArray(1)
 
-    // YOLO format output tensor: shape [1, 5, yoloAnchorCount]
-    private val yoloOutput = Array(1) { Array(5) { FloatArray(yoloAnchorCount) } }
+    // YOLO format output tensor: shape [1, yoloChannelCount, yoloAnchorCount]
+    private val yoloOutput = Array(1) { Array(yoloChannelCount) { FloatArray(yoloAnchorCount) } }
 
     // Pre-allocated output map for TFLite invocation
     private val outputsMap: Map<Int, Any> = if (isYolo) {
@@ -358,14 +402,17 @@ class TFLiteBallDetector(
     private fun parseYoloDetection(
         width: Int,
         height: Int,
-        startNs: Long
+        startNs: Long,
+        targetClassId: Int = 0
     ): BallDetectionResult? {
         val anchors = yoloAnchorCount
         val cxRow = yoloOutput[0][0]
         val cyRow = yoloOutput[0][1]
         val wRow = yoloOutput[0][2]
         val hRow = yoloOutput[0][3]
-        val confRow = yoloOutput[0][4]
+        
+        val confRowIdx = (4 + targetClassId).coerceIn(4, yoloChannelCount - 1)
+        val confRow = yoloOutput[0][confRowIdx]
 
         var bestIdx = -1
         var bestScore = confidenceThreshold
@@ -412,6 +459,76 @@ class TFLiteBallDetector(
         )
     }
 
+    /**
+     * Detects a specific visual landmark class (e.g. pin_rack = 1, foul_line = 3, arrows = 4)
+     * using the edge YOLOv8 model.
+     */
+    fun detectLandmark(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width,
+        classId: Int = 1
+    ): LandmarkDetection? {
+        if (!isYolo || classId >= yoloClassCount) return null
+
+        prepareInputFromByteArray(imageBytes, width, height, stride)
+        inputTensorBuffer.rewind()
+        runner.run(inputTensorBuffer, outputsMap)
+
+        val anchors = yoloAnchorCount
+        val cxRow = yoloOutput[0][0]
+        val cyRow = yoloOutput[0][1]
+        val wRow = yoloOutput[0][2]
+        val hRow = yoloOutput[0][3]
+        val confRow = yoloOutput[0][4 + classId]
+
+        var bestIdx = -1
+        var bestScore = confidenceThreshold
+
+        for (i in 0 until anchors) {
+            val score = confRow[i]
+            if (score >= bestScore) {
+                bestScore = score
+                bestIdx = i
+            }
+        }
+
+        if (bestIdx < 0) return null
+
+        val normCx = cxRow[bestIdx] / inputSize.toDouble()
+        val normCy = cyRow[bestIdx] / inputSize.toDouble()
+        val normW = wRow[bestIdx] / inputSize.toDouble()
+        val normH = hRow[bestIdx] / inputSize.toDouble()
+
+        val xmin = (normCx - normW / 2.0).coerceIn(0.0, 1.0)
+        val ymin = (normCy - normH / 2.0).coerceIn(0.0, 1.0)
+        val xmax = (normCx + normW / 2.0).coerceIn(xmin, 1.0)
+        val ymax = (normCy + normH / 2.0).coerceIn(ymin, 1.0)
+
+        val u = normCx * width
+        val v = normCy * height
+        val className = DEFAULT_CLASS_LABELS.getOrElse(classId) { "class_$classId" }
+
+        return LandmarkDetection(
+            classId = classId,
+            className = className,
+            centroid = Point2D(u, v),
+            boundingBox = floatArrayOf(ymin.toFloat(), xmin.toFloat(), ymax.toFloat(), xmax.toFloat()),
+            confidence = bestScore
+        )
+    }
+
+    /**
+     * Dedicated convenience detector for the 10-Pin Rack (Class 1).
+     */
+    fun detectPinRack(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 1)
+
     override fun close() {
         runner.close()
     }
@@ -429,6 +546,7 @@ interface TFLiteRunner : AutoCloseable {
     fun getInputChannels(): Int = 1
     fun isYoloFormat(): Boolean = false
     fun getYoloAnchorCount(): Int = 3549
+    fun getYoloChannelCount(): Int = 5
 }
 
 /**
@@ -479,15 +597,24 @@ class AndroidInterpreterRunner(
     override fun isYoloFormat(): Boolean {
         return try {
             val shape = interpreter.getOutputTensor(0).shape()
-            shape.size == 3 && (shape[1] == 5 || shape[2] == 5)
+            shape.size == 3 && ((shape[1] in 5..32) || (shape[2] in 5..32))
         } catch (e: Throwable) { false }
+    }
+
+    override fun getYoloChannelCount(): Int {
+        return try {
+            val shape = interpreter.getOutputTensor(0).shape()
+            if (shape.size == 3) {
+                if (shape[1] < shape[2]) shape[1] else shape[2]
+            } else 5
+        } catch (e: Throwable) { 5 }
     }
 
     override fun getYoloAnchorCount(): Int {
         return try {
             val shape = interpreter.getOutputTensor(0).shape()
             if (shape.size == 3) {
-                if (shape[1] == 5) shape[2] else shape[1]
+                if (shape[1] < shape[2]) shape[2] else shape[1]
             } else 3549
         } catch (e: Throwable) { 3549 }
     }
