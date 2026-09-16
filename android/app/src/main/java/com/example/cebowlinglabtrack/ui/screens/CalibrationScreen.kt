@@ -105,7 +105,7 @@ fun CalibrationScreen(
     bowlerHandedness: Handedness = Handedness.RIGHT,
     onZoomChange: (Float) -> Unit = {},
     onSaveCalibration: (Point2D, Point2D, Point2D, Point2D, CalibrationAnchorMode) -> Unit,
-    onAutoDetectLaneDetailed: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, alignment: Handedness) -> AutoLaneDetector.AutoDetectionResult)? = null,
+    onAutoDetectLaneDetailed: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, alignment: Handedness, anchorMode: CalibrationAnchorMode) -> AutoLaneDetector.AutoDetectionResult)? = null,
     onAutoDetectLane: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, alignment: Handedness) -> Boolean)? = null,
     onCalibrateDefault: ((alignment: Handedness) -> Unit)? = null,
     onCancel: () -> Unit,
@@ -764,7 +764,7 @@ fun CalibrationScreen(
                         val frame = latestFrameBytes
                         if (frame != null) {
                             if (onAutoDetectLaneDetailed != null) {
-                                val res = onAutoDetectLaneDetailed(frame, frameWidth, frameHeight, frameStride, alignmentHandedness)
+                                val res = onAutoDetectLaneDetailed(frame, frameWidth, frameHeight, frameStride, alignmentHandedness, anchorMode)
                                 autoDetectionStatus = res.statusMessage
                                 currentGuidance = res.autoCenterGuidance
                                 if (res.isSuccess) {
@@ -772,10 +772,12 @@ fun CalibrationScreen(
                                     flY = res.foulLineLeft.y.toFloat()
                                     frX = res.foulLineRight.x.toFloat()
                                     frY = res.foulLineRight.y.toFloat()
-                                    alX = res.arrowsLeft.x.toFloat()
-                                    alY = res.arrowsLeft.y.toFloat()
-                                    arX = res.arrowsRight.x.toFloat()
-                                    arY = res.arrowsRight.y.toFloat()
+                                    val topL = if (anchorMode == CalibrationAnchorMode.PIN_DECK) (res.pinDeckLeft ?: res.arrowsLeft) else res.arrowsLeft
+                                    val topR = if (anchorMode == CalibrationAnchorMode.PIN_DECK) (res.pinDeckRight ?: res.arrowsRight) else res.arrowsRight
+                                    alX = topL.x.toFloat()
+                                    alY = topL.y.toFloat()
+                                    arX = topR.x.toFloat()
+                                    arY = topR.y.toFloat()
                                     if (abs(res.optimalZoomRatio - zoomRatio) > 0.15f) {
                                         onZoomChange(res.optimalZoomRatio)
                                     }

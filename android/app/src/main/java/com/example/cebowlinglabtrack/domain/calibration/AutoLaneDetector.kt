@@ -26,6 +26,8 @@ class AutoLaneDetector(
         val foulLineRight: Point2D,
         val arrowsLeft: Point2D,
         val arrowsRight: Point2D,
+        val pinDeckLeft: Point2D? = null,
+        val pinDeckRight: Point2D? = null,
         val optimalZoomRatio: Float = 1.0f,
         val statusMessage: String = "",
         val pinRackDetected: Boolean = false,
@@ -45,19 +47,30 @@ class AutoLaneDetector(
         height: Int,
         stride: Int = width,
         zoomRatio: Float = 1.0f,
-        alignment: Handedness = Handedness.RIGHT
+        alignment: Handedness = Handedness.RIGHT,
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK
     ): AutoDetectionResult {
         // Run full hierarchical autonomous recognition (Pins -> Gutters -> Foul Line -> Arrows)
-        val recognition = laneRecognizer.recognizeLane(imageBytes, width, height, stride, zoomRatio, alignment)
+        val recognition = laneRecognizer.recognizeLane(imageBytes, width, height, stride, zoomRatio, alignment, anchorMode)
 
-        val defaultCalibPair = calibrator.createDefaultCalibration(
+        val defaultArrowsPair = calibrator.createDefaultCalibration(
+            viewWidth = width.toFloat(),
+            viewHeight = height.toFloat(),
+            zoomRatio = zoomRatio,
+            anchorMode = CalibrationAnchorMode.GUTTERS_AT_ARROWS,
+            alignment = alignment
+        )
+        val defaultArrows = defaultArrowsPair.first
+
+        val defaultDeckPair = calibrator.createDefaultCalibration(
             viewWidth = width.toFloat(),
             viewHeight = height.toFloat(),
             zoomRatio = zoomRatio,
             anchorMode = CalibrationAnchorMode.PIN_DECK,
             alignment = alignment
         )
-        val defaultCalib = defaultCalibPair.first
+        val defaultDeck = defaultDeckPair.first
+        val defaultCalib = if (anchorMode == CalibrationAnchorMode.PIN_DECK) defaultDeck else defaultArrows
 
         if (recognition.isSuccess && recognition.calibration != null) {
             return AutoDetectionResult(
@@ -66,8 +79,10 @@ class AutoLaneDetector(
                 calibration = recognition.calibration,
                 foulLineLeft = recognition.foulLineLeft ?: defaultCalib.foulLineLeftScreen,
                 foulLineRight = recognition.foulLineRight ?: defaultCalib.foulLineRightScreen,
-                arrowsLeft = recognition.arrowsLeft ?: defaultCalib.arrowsLeftScreen,
-                arrowsRight = recognition.arrowsRight ?: defaultCalib.arrowsRightScreen,
+                arrowsLeft = recognition.arrowsLeft ?: defaultArrows.arrowsLeftScreen,
+                arrowsRight = recognition.arrowsRight ?: defaultArrows.arrowsRightScreen,
+                pinDeckLeft = recognition.pinDeckLeft ?: defaultDeck.arrowsLeftScreen,
+                pinDeckRight = recognition.pinDeckRight ?: defaultDeck.arrowsRightScreen,
                 optimalZoomRatio = recognition.optimalZoomRatio,
                 statusMessage = recognition.statusMessage,
                 pinRackDetected = recognition.pinRackDetected,
@@ -82,8 +97,10 @@ class AutoLaneDetector(
                 calibration = defaultCalib,
                 foulLineLeft = recognition.foulLineLeft ?: defaultCalib.foulLineLeftScreen,
                 foulLineRight = recognition.foulLineRight ?: defaultCalib.foulLineRightScreen,
-                arrowsLeft = recognition.arrowsLeft ?: defaultCalib.arrowsLeftScreen,
-                arrowsRight = recognition.arrowsRight ?: defaultCalib.arrowsRightScreen,
+                arrowsLeft = recognition.arrowsLeft ?: defaultArrows.arrowsLeftScreen,
+                arrowsRight = recognition.arrowsRight ?: defaultArrows.arrowsRightScreen,
+                pinDeckLeft = recognition.pinDeckLeft ?: defaultDeck.arrowsLeftScreen,
+                pinDeckRight = recognition.pinDeckRight ?: defaultDeck.arrowsRightScreen,
                 optimalZoomRatio = recognition.optimalZoomRatio,
                 statusMessage = recognition.statusMessage,
                 pinRackDetected = recognition.pinRackDetected,

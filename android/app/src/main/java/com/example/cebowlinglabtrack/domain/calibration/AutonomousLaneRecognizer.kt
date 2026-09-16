@@ -58,6 +58,8 @@ class AutonomousLaneRecognizer(
         val foulLineRight: Point2D?,
         val arrowsLeft: Point2D?,
         val arrowsRight: Point2D?,
+        val pinDeckLeft: Point2D? = null,
+        val pinDeckRight: Point2D? = null,
         val autoCenterGuidance: String?,
         val optimalZoomRatio: Float = 1.0f,
         val confidence: Double = 0.0
@@ -75,7 +77,8 @@ class AutonomousLaneRecognizer(
         height: Int,
         stride: Int = width,
         zoomRatio: Float = 1.0f,
-        alignment: Handedness = Handedness.RIGHT
+        alignment: Handedness = Handedness.RIGHT,
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK
     ): LaneRecognitionResult {
         val w = width.toDouble()
         val h = height.toDouble()
@@ -226,13 +229,19 @@ class AutonomousLaneRecognizer(
             zoomRatio
         }
 
-        val calibPair = calibrator.calibrateGutters(
-            foulLineLeft = flL,
-            foulLineRight = flR,
-            gutterLeft15ft = alL,
-            gutterRight15ft = arR,
-            calibrationZoomRatio = zoomRatio
-        )
+        val calibPair = if (anchorMode == CalibrationAnchorMode.PIN_DECK) {
+            deckCalibResult
+        } else {
+            calibrator.calibrateGutters(
+                foulLineLeft = flL,
+                foulLineRight = flR,
+                gutterLeft15ft = alL,
+                gutterRight15ft = arR,
+                calibrationZoomRatio = zoomRatio
+            )
+        }
+        val topL = if (anchorMode == CalibrationAnchorMode.PIN_DECK) pinDeckL else alL
+        val topR = if (anchorMode == CalibrationAnchorMode.PIN_DECK) pinDeckR else arR
 
         val finalCalib = calibPair?.first
         val finalH = calibPair?.second
@@ -252,6 +261,8 @@ class AutonomousLaneRecognizer(
             foulLineRight = flR,
             arrowsLeft = alL,
             arrowsRight = arR,
+            pinDeckLeft = pinDeckL,
+            pinDeckRight = pinDeckR,
             autoCenterGuidance = autoCenterGuidance,
             optimalZoomRatio = optimalZoom,
             confidence = overallConfidence

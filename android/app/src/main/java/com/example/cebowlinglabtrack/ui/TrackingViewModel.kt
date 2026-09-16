@@ -7,6 +7,7 @@ import com.example.cebowlinglabtrack.camera.TripodAngleAdvisor
 import com.example.cebowlinglabtrack.data.export.ShotJsonExporter
 import com.example.cebowlinglabtrack.data.repository.BowlingRepository
 import com.example.cebowlinglabtrack.domain.calibration.AutoLaneDetector
+import com.example.cebowlinglabtrack.domain.calibration.CalibrationAnchorMode
 import com.example.cebowlinglabtrack.domain.calibration.HomographyMatrix
 import com.example.cebowlinglabtrack.domain.calibration.LaneCalibrator
 import com.example.cebowlinglabtrack.domain.calibration.ProjectedLaneGuides
@@ -354,7 +355,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         width: Int,
         height: Int,
         stride: Int = width,
-        alignment: Handedness? = null
+        alignment: Handedness? = null,
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK
     ): AutoLaneDetector.AutoDetectionResult {
         updateViewportSize(width.toFloat(), height.toFloat())
         val currentZoom = _uiState.value.zoomRatio
@@ -365,7 +367,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             height = height,
             stride = stride,
             zoomRatio = currentZoom,
-            alignment = effectiveAlignment
+            alignment = effectiveAlignment,
+            anchorMode = anchorMode
         )
 
         if (result.isSuccess) {

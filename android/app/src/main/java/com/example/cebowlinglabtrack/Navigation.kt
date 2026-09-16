@@ -156,8 +156,8 @@ fun MainNavigation(
                         bowlerHandedness = uiState.activeBowler?.handedness ?: Handedness.RIGHT,
                         onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
                         onCalibrateDefault = { alignment -> viewModel.calibrateWithDefaults(alignment = alignment) },
-                        onAutoDetectLaneDetailed = { bytes, w, h, s, alignment ->
-                            viewModel.autoDetectLaneDetailed(bytes, w, h, s, alignment = alignment)
+                        onAutoDetectLaneDetailed = { bytes, w, h, s, alignment, mode ->
+                            viewModel.autoDetectLaneDetailed(bytes, w, h, s, alignment = alignment, anchorMode = mode)
                         },
                         onAutoDetectLane = { bytes, w, h, s, alignment ->
                             viewModel.autoCalibrateFromFrame(bytes, w, h, s, alignment = alignment)
