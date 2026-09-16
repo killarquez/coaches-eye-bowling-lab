@@ -37,6 +37,10 @@ android {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
       }
     }
+
+    androidResources {
+      noCompress += "tflite"
+    }
 }
 
 kotlin {
@@ -91,4 +95,9 @@ dependencies {
   implementation(libs.androidx.navigation3.ui)
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+
+  // LiteRT / TensorFlow Lite
+  implementation(libs.tensorflow.lite)
+  implementation(libs.tensorflow.lite.gpu)
+  implementation(libs.tensorflow.lite.gpu.api)
 }

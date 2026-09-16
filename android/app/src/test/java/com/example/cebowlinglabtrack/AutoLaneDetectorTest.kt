@@ -182,17 +182,41 @@ class AutoLaneDetectorTest {
         assertTrue("Lane width at foul line should be wider when zoomed in", width25x > width1x)
     }
 
+    @Test
+    fun testDetectPinsAtHighPerspectiveFarDistance() {
+        val detector = AutoLaneDetector()
+        val width = 440
+        val height = 510
+        val stride = width
+
+        // Real alley perspective: pins located at 8% of frame height (y ~ 40)
+        val imageBytes = createSyntheticLaneFrame(
+            width = width,
+            height = height,
+            pinRackCenterX = width / 2.0,
+            includePins = true,
+            pinDeckYPct = 0.08
+        )
+
+        val result = detector.detectLaneFromFrame(imageBytes, width, height, stride)
+
+        assertNotNull("Detection result should not be null", result)
+        assertTrue("Pin rack must be detected when pins are high at 8% height", result.pinRackDetected)
+        assertTrue("Detection should succeed at high perspective", result.isSuccess)
+    }
+
     private fun createSyntheticLaneFrame(
         width: Int,
         height: Int,
         pinRackCenterX: Double = width / 2.0,
-        includePins: Boolean = true
+        includePins: Boolean = true,
+        pinDeckYPct: Double = 0.32
     ): ByteArray {
         val stride = width
         val imageBytes = ByteArray(width * height)
 
-        val pinDeckY = (height * 0.32).toInt()
-        val foulY = (height * 0.65).toInt()
+        val pinDeckY = (height * pinDeckYPct).toInt()
+        val foulY = (height * 0.70).toInt()
 
         for (y in 0 until height) {
             val rowOffset = y * stride

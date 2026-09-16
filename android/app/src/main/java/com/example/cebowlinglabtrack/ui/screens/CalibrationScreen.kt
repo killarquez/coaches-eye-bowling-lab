@@ -571,14 +571,14 @@ fun CalibrationScreen(
                 }
             }
 
-            // Auto-Center & Lane Alignment Guidance Chip (Top Center)
+            // Auto-Center & Lane Alignment Guidance Chip (Positioned at bottom so pin deck at top of viewfinder is never occluded)
             val activeGuidance = currentGuidance ?: autoCenterGuidance
             activeGuidance?.let { guidance ->
                 val isCentered = guidance.contains("CENTERED")
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 10.dp)
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 115.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isCentered) UsbcNavyDark.copy(alpha = 0.94f) else DarkSurface.copy(alpha = 0.94f))
                         .border(1.5.dp, if (isCentered) NeonStrikeGreen else ElectricAmber, RoundedCornerShape(20.dp))

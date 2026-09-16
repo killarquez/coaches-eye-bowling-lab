@@ -77,7 +77,7 @@ class AutonomousLaneRecognizer(
 
         // 1. Stage 1: Detect Full 10-Pin Rack (Primary Environmental Anchor)
         val pinRack = detectPinRack(imageBytes, width, height, stride, zoomRatio)
-        if (pinRack == null || pinRack.confidence < 0.60) {
+        if (pinRack == null || pinRack.confidence < 0.45) {
             return LaneRecognitionResult(
                 isSuccess = false,
                 statusMessage = "❌ NO PIN RACK DETECTED - AIM AT PINS",
@@ -109,7 +109,7 @@ class AutonomousLaneRecognizer(
 
         // 2. Stage 2: Trace Gutter Boundaries from Pins Downwards
         val gutters = traceGuttersFromPins(imageBytes, pinRack, width, height, stride, zoomRatio)
-        if (gutters == null || gutters.confidence < 0.55) {
+        if (gutters == null || gutters.confidence < 0.50) {
             return LaneRecognitionResult(
                 isSuccess = false,
                 statusMessage = "PINS DETECTED • ALIGN GUTTERS IN VIEW",
@@ -265,9 +265,11 @@ class AutonomousLaneRecognizer(
         val w = width.toDouble()
         val h = height.toDouble()
 
-        // Pin rack search vertical region
-        val minScanY = (h * if (zoomRatio >= 2.0f) 0.18 else 0.25).toInt().coerceIn(0, height - 1)
-        val maxScanY = (h * if (zoomRatio >= 2.0f) 0.55 else 0.65).toInt().coerceIn(0, height - 1)
+        // Pin rack search vertical region:
+        // In real-world bowling framing (perspective looking down the lane at 60 ft),
+        // the pin deck sits in the upper 2% to 38% of the camera frame.
+        val minScanY = (h * 0.02).toInt().coerceIn(0, height - 1)
+        val maxScanY = (h * if (zoomRatio >= 2.0f) 0.42 else 0.38).toInt().coerceIn(minScanY + 10, height - 1)
 
         var bestCandidate: PinRackCandidate? = null
         var maxScore = 0.0
@@ -296,38 +298,38 @@ class AutonomousLaneRecognizer(
                 // Check for local maxima (pin reflection peaks)
                 if (lum > prevVal) {
                     isRising = true
-                } else if (lum < prevVal - 4 && isRising && prevVal > 155) {
+                } else if (lum < prevVal - 4 && isRising && prevVal > 138) {
                     segmentPeakCount++
                     isRising = false
                 }
                 prevVal = lum
 
-                if (lum > 145 && !inBrightSegment) {
+                if (lum > 135 && !inBrightSegment) {
                     inBrightSegment = true
                     segmentStartX = x
                     segmentEndX = x
                     segmentPeakCount = 0
                     darkGapCount = 0
                 } else if (inBrightSegment) {
-                    if (lum > 130) {
+                    if (lum > 115) {
                         segmentEndX = x
                         darkGapCount = 0
                     } else {
                         darkGapCount++
                     }
 
-                    // Segment terminates if gap exceeds 18px or row ends
-                    if (darkGapCount > 18 || x == maxX) {
+                    // Segment terminates if dark gap exceeds 8px (separating adjacent lanes) or row ends
+                    if (darkGapCount > 8 || x == maxX) {
                         inBrightSegment = false
                         val segmentWidth = segmentEndX - segmentStartX
-                        val expectedPinRackWidth = w * (0.07 + 0.08 * (zoomRatio - 1.0f).coerceIn(0f, 2.5f))
+                        val expectedPinRackWidth = w * (0.08 + 0.08 * (zoomRatio - 1.0f).coerceIn(0f, 2.5f))
 
-                        // Bounding width should match pin deck perspective (~3% to 35% of screen width)
-                        if (segmentWidth in (expectedPinRackWidth * 0.35).toInt()..(expectedPinRackWidth * 2.5).toInt()) {
+                        // Bounding width should match pin deck perspective (~2% to 35% of screen width)
+                        if (segmentWidth in (expectedPinRackWidth * 0.25).toInt()..(expectedPinRackWidth * 2.6).toInt()) {
                             // Check dark background contrast above and to the sides (dark pit / pinsetter mask)
-                            val bgLeftX = (segmentStartX - 10).coerceIn(0, width - 1)
-                            val bgRightX = (segmentEndX + 10).coerceIn(0, width - 1)
-                            val bgAboveY = (y - 8).coerceIn(0, height - 1)
+                            val bgLeftX = (segmentStartX - 8).coerceIn(0, width - 1)
+                            val bgRightX = (segmentEndX + 8).coerceIn(0, width - 1)
+                            val bgAboveY = (y - 6).coerceIn(0, height - 1)
 
                             val bgLeftLum = imageBytes[rowOffset + bgLeftX].toInt() and 0xFF
                             val bgRightLum = imageBytes[rowOffset + bgRightX].toInt() and 0xFF
@@ -336,18 +338,19 @@ class AutonomousLaneRecognizer(
 
                             val contrast = (175.0 - darkPitLum) / 175.0
 
-                            if (contrast > 0.35 && segmentPeakCount >= 2) {
+                            if (contrast > 0.25 && segmentPeakCount >= 2) {
                                 val centerX = segmentStartX + segmentWidth / 2.0
                                 val centerOffsetRatio = abs(centerX - w / 2.0) / (w / 2.0)
-                                val confidence = ((contrast * 0.6) + (min(segmentPeakCount, 5) / 5.0 * 0.4)).coerceIn(0.0, 1.0)
-                                val score = confidence * (1.0 - 0.5 * centerOffsetRatio)
+                                val confidence = ((contrast * 0.5) + (min(segmentPeakCount, 5) / 5.0 * 0.5)).coerceIn(0.0, 1.0)
+                                // Prioritize candidate closest to the optical center (target lane)
+                                val score = confidence * (1.0 - 0.6 * centerOffsetRatio)
 
                                 if (score > maxScore) {
                                     maxScore = score
                                     bestCandidate = PinRackCandidate(
                                         centerX = centerX,
-                                        topY = (y - 15).toDouble().coerceAtLeast(0.0),
-                                        bottomY = (y + 15).toDouble().coerceAtMost(h - 1.0),
+                                        topY = (y - 12).toDouble().coerceAtLeast(0.0),
+                                        bottomY = (y + 12).toDouble().coerceAtMost(h - 1.0),
                                         widthPx = segmentWidth.toDouble(),
                                         pinPeakCount = segmentPeakCount,
                                         contrastRatio = contrast,
@@ -378,12 +381,12 @@ class AutonomousLaneRecognizer(
         val w = width.toDouble()
         val h = height.toDouble()
 
-        val startY = pinRack.bottomY.toInt() + 10
-        val endY = (h * (if (zoomRatio >= 2.0f) 0.82 else 0.65)).toInt().coerceIn(startY + 30, height - 1)
+        val startY = pinRack.bottomY.toInt() + 4
+        val endY = (h * (if (zoomRatio >= 2.0f) 0.85 else 0.75)).toInt().coerceIn(startY + 30, height - 1)
 
         val halfRack = pinRack.widthPx / 2.0
-        // Outward offset prevents clamping to the outer skirt of pins 7 & 10 (boards 2-3 & 37-38)
-        val gutterSeedOffsetPx = (pinRack.widthPx * 0.08).coerceIn(20.0, 40.0)
+        // Dynamic outward offset prevents clamping to the outer skirt of pins 7 & 10 (boards 2-3 & 37-38)
+        val gutterSeedOffsetPx = (pinRack.widthPx * 0.18).coerceIn(10.0, 35.0)
 
         val seedLeftX = (pinRack.centerX - halfRack) - gutterSeedOffsetPx
         val seedRightX = (pinRack.centerX + halfRack) + gutterSeedOffsetPx
@@ -391,19 +394,21 @@ class AutonomousLaneRecognizer(
         val leftGutterPoints = mutableListOf<Point2D>()
         val rightGutterPoints = mutableListOf<Point2D>()
 
-        val stepY = max(2, (endY - startY) / 12)
+        val stepY = max(2, (endY - startY) / 16)
+        val searchMargin = max(gutterSeedOffsetPx * 2.5, 40.0)
+
         for (y in startY..endY step stepY) {
             val rowOffset = y * stride
 
             // Expected lane expansion from pin deck center
             val progress = (y - startY).toDouble() / (endY - startY)
-            val expansion = progress * (pinRack.widthPx * (if (zoomRatio >= 2.0f) 1.2 else 2.2))
+            val expansion = (progress * progress.coerceAtLeast(0.7)) * (pinRack.widthPx * (if (zoomRatio >= 2.0f) 1.6 else 2.6))
             val expectedLeftX = seedLeftX - expansion
             val expectedRightX = seedRightX + expansion
 
             // Search left gutter around expectedLeftX with outward bias
-            val leftSearchStart = (expectedLeftX - gutterSeedOffsetPx * 1.5).toInt().coerceIn(0, width - 10)
-            val leftSearchEnd = (expectedLeftX + gutterSeedOffsetPx * 0.8).toInt().coerceIn(leftSearchStart + 5, width - 1)
+            val leftSearchStart = (expectedLeftX - searchMargin).toInt().coerceIn(0, width - 10)
+            val leftSearchEnd = (expectedLeftX + searchMargin * 0.8).toInt().coerceIn(leftSearchStart + 5, width - 1)
 
             var bestLeftGrad = 0
             var bestLeftX = -1
@@ -413,7 +418,7 @@ class AutonomousLaneRecognizer(
                 val val1 = imageBytes[idx].toInt() and 0xFF
                 val val2 = imageBytes[idx + 4].toInt() and 0xFF
                 val grad = val2 - val1 // Gutter to lane
-                if (grad > bestLeftGrad && grad > 20) {
+                if (grad > bestLeftGrad && grad > 15) {
                     bestLeftGrad = grad
                     bestLeftX = x + 2
                 }
@@ -423,8 +428,8 @@ class AutonomousLaneRecognizer(
             }
 
             // Search right gutter around expectedRightX with outward bias
-            val rightSearchStart = (expectedRightX - gutterSeedOffsetPx * 0.8).toInt().coerceIn(0, width - 10)
-            val rightSearchEnd = (expectedRightX + gutterSeedOffsetPx * 1.5).toInt().coerceIn(rightSearchStart + 5, width - 1)
+            val rightSearchStart = (expectedRightX - searchMargin * 0.8).toInt().coerceIn(0, width - 10)
+            val rightSearchEnd = (expectedRightX + searchMargin).toInt().coerceIn(rightSearchStart + 5, width - 1)
 
             var bestRightGrad = 0
             var bestRightX = -1
@@ -434,7 +439,7 @@ class AutonomousLaneRecognizer(
                 val val1 = imageBytes[idx].toInt() and 0xFF
                 val val2 = imageBytes[idx + 4].toInt() and 0xFF
                 val grad = val1 - val2 // Lane to gutter
-                if (grad > bestRightGrad && grad > 20) {
+                if (grad > bestRightGrad && grad > 15) {
                     bestRightGrad = grad
                     bestRightX = x + 2
                 }
@@ -444,7 +449,7 @@ class AutonomousLaneRecognizer(
             }
         }
 
-        if (leftGutterPoints.size < 4 || rightGutterPoints.size < 4) return null
+        if (leftGutterPoints.size < 3 || rightGutterPoints.size < 3) return null
 
         // Fit lines via linear regression: x = slope * y + intercept
         val (leftSlope, leftIntercept) = fitLine(leftGutterPoints)
@@ -453,7 +458,7 @@ class AutonomousLaneRecognizer(
         // Sanity checks:
         // Left gutter must slant leftwards (slope <= 0 in image coordinates: larger y gives smaller x)
         // Right gutter must slant rightwards (slope >= 0 in image coordinates: larger y gives larger x)
-        val validSlopes = (leftSlope <= 0.05) && (rightSlope >= -0.05)
+        val validSlopes = (leftSlope <= 0.15) && (rightSlope >= -0.15)
         val confidence = if (validSlopes) 0.85 else 0.50
 
         return GutterBoundaryLines(

@@ -14,6 +14,7 @@ import com.example.cebowlinglabtrack.domain.kinematics.PoseFrame
 import com.example.cebowlinglabtrack.domain.ml.OpticalRevCounter
 import com.example.cebowlinglabtrack.domain.ml.OpticalBallDetector
 import com.example.cebowlinglabtrack.domain.ml.PinDeckDetector
+import com.example.cebowlinglabtrack.domain.ml.TFLiteBallDetector
 import com.example.cebowlinglabtrack.domain.ml.ShotStylePreset
 import com.example.cebowlinglabtrack.domain.ml.SimulatedShotGenerator
 import com.example.cebowlinglabtrack.domain.model.BallMetrics
@@ -65,6 +66,7 @@ data class TrackingUiState(
     val activeBowler: BowlerProfile? = null,
     val allBowlers: List<BowlerProfile> = emptyList(),
     val isOpticalRevModeActive: Boolean = true,
+    val isMLDetectorActive: Boolean = true,
     val laneRecognitionStatus: String? = null,
     val autoCenterGuidance: String? = null,
     val pinRackDetected: Boolean = false,
@@ -80,6 +82,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     private var homography: HomographyMatrix = HomographyMatrix.identity()
     private val trajectoryTracker = TrajectoryTracker(homography)
     private val opticalBallDetector = OpticalBallDetector(homography)
+    private var tfliteBallDetector: TFLiteBallDetector? = null
     private val opticalRevCounter = OpticalRevCounter()
     private val pinDeckDetector = PinDeckDetector(homography)
     private val tripodAngleAdvisor = TripodAngleAdvisor(application)
@@ -101,6 +104,13 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     private var viewportHeight: Float = 1920f
 
     init {
+        try {
+            tfliteBallDetector = TFLiteBallDetector.fromAsset(application)
+        } catch (e: Throwable) {
+            // Graceful fallback to OpticalBallDetector if TFLite asset is uninitialized or unsupported
+            tfliteBallDetector = null
+        }
+
         tripodAngleAdvisor.startListening()
 
         viewModelScope.launch {
@@ -171,6 +181,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         tripodAngleAdvisor.stopListening()
+        tfliteBallDetector?.close()
+        tfliteBallDetector = null
     }
 
     /**
@@ -203,13 +215,33 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             pinDeckDetector.captureBaselinePins(imageBytes, width, height, stride)
         }
 
-        // 1. Run real-time optical ball centroid detection (<3ms)
-        val detectedCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
-        val latency = opticalBallDetector.getLastInferenceLatencyMs()
+        // 1. Run real-time ball detection (LiteRT ML detector with optical differencing fallback)
+        val detectedCentroid: Point2D?
+        val latency: Double
+        val ballRadiusPx: Int
+
+        val mlDetector = tfliteBallDetector
+        if (_uiState.value.isMLDetectorActive && mlDetector != null) {
+            val mlCentroid = mlDetector.detectBall(imageBytes, width, height, stride)
+            if (mlCentroid != null) {
+                detectedCentroid = mlCentroid
+                latency = mlDetector.getLastInferenceLatencyMs()
+                ballRadiusPx = mlDetector.getLastBallRadiusPx()
+            } else {
+                // Secondary fallback to classical optical differencing if ML confidence is below threshold
+                detectedCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
+                latency = opticalBallDetector.getLastInferenceLatencyMs()
+                ballRadiusPx = opticalBallDetector.getLastBallRadiusPx()
+            }
+        } else {
+            // Optical differencing mode
+            detectedCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
+            latency = opticalBallDetector.getLastInferenceLatencyMs()
+            ballRadiusPx = opticalBallDetector.getLastBallRadiusPx()
+        }
 
         // 2. If ball is detected, feed high-contrast tape sub-region into Optical Rev Counter
         if (detectedCentroid != null && _uiState.value.isOpticalRevModeActive) {
-            val ballRadiusPx = opticalBallDetector.getLastBallRadiusPx()
             opticalRevCounter.processFrame(
                 imageBytes = imageBytes,
                 width = width,
@@ -559,6 +591,23 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = _uiState.value.copy(
             isOpticalRevModeActive = active ?: !_uiState.value.isOpticalRevModeActive
         )
+    }
+
+    /**
+     * Toggles the edge LiteRT / TFLite ball detector engine vs optical frame differencing.
+     */
+    fun toggleMLDetectorMode(active: Boolean? = null) {
+        _uiState.value = _uiState.value.copy(
+            isMLDetectorActive = active ?: !_uiState.value.isMLDetectorActive
+        )
+    }
+
+    /**
+     * Sets or injects a custom [TFLiteBallDetector] instance.
+     */
+    fun setMLDetector(detector: TFLiteBallDetector?) {
+        this.tfliteBallDetector?.close()
+        this.tfliteBallDetector = detector
     }
 
     /**

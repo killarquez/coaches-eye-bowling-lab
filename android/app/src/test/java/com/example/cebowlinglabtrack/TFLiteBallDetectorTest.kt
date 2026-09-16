@@ -1,0 +1,220 @@
+package com.example.cebowlinglabtrack
+
+import com.example.cebowlinglabtrack.domain.calibration.LaneCalibrator
+import com.example.cebowlinglabtrack.domain.ml.BallDetectorEngine
+import com.example.cebowlinglabtrack.domain.ml.OpticalBallDetector
+import com.example.cebowlinglabtrack.domain.ml.TFLiteBallDetector
+import com.example.cebowlinglabtrack.domain.ml.TFLiteRunner
+import com.example.cebowlinglabtrack.domain.model.Point2D
+import com.example.cebowlinglabtrack.domain.tracking.TrajectoryTracker
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+class TFLiteBallDetectorTest {
+
+    /**
+     * Controllable synthetic TFLite runner for deterministic unit testing on host JVM.
+     */
+    private class MockTFLiteRunner(
+        private val mockBoxes: Array<FloatArray> = arrayOf(floatArrayOf(0.70f, 0.48f, 0.74f, 0.52f)),
+        private val mockScores: FloatArray = floatArrayOf(0.92f),
+        private val mockClasses: FloatArray = floatArrayOf(0.0f)
+    ) : TFLiteRunner {
+        var isClosed = false
+        var runInvocationCount = 0
+        var lastInputCapacity = 0
+
+        override fun run(input: ByteBuffer, outputs: Map<Int, Any>) {
+            runInvocationCount++
+            lastInputCapacity = input.capacity()
+
+            @Suppress("UNCHECKED_CAST")
+            val outputLocations = outputs[0] as? Array<Array<FloatArray>>
+            @Suppress("UNCHECKED_CAST")
+            val outputClasses = outputs[1] as? Array<FloatArray>
+            @Suppress("UNCHECKED_CAST")
+            val outputScores = outputs[2] as? Array<FloatArray>
+            val outputNum = outputs[3] as? FloatArray
+
+            if (outputLocations != null && outputScores != null) {
+                // Populate mock detections
+                val numDet = mockBoxes.size.coerceAtMost(TFLiteBallDetector.MAX_DETECTIONS)
+                for (i in 0 until numDet) {
+                    outputLocations[0][i][0] = mockBoxes[i][0]
+                    outputLocations[0][i][1] = mockBoxes[i][1]
+                    outputLocations[0][i][2] = mockBoxes[i][2]
+                    outputLocations[0][i][3] = mockBoxes[i][3]
+                    outputScores[0][i] = mockScores.getOrElse(i) { 0.0f }
+                    outputClasses?.get(0)?.set(i, mockClasses.getOrElse(i) { 0.0f })
+                }
+                outputNum?.set(0, numDet.toFloat())
+            }
+        }
+
+        override fun close() {
+            isClosed = true
+        }
+    }
+
+    @Test
+    fun testInitializationAndCleanClosure() {
+        val mockRunner = MockTFLiteRunner()
+        val detector = TFLiteBallDetector.createForTesting(mockRunner)
+
+        assertFalse("Runner should not be closed on start", mockRunner.isClosed)
+        detector.close()
+        assertTrue("Runner must be closed cleanly to release GPU/native handles", mockRunner.isClosed)
+    }
+
+    @Test
+    fun testZeroAllocationInputMappingFromByteArray() {
+        val mockRunner = MockTFLiteRunner()
+        val detector = TFLiteBallDetector.createForTesting(mockRunner, inputSize = 416)
+
+        val width = 1080
+        val height = 1920
+        val imageBytes = ByteArray(width * height) { (it % 255).toByte() }
+
+        // Execute detection
+        val centroid = detector.detectBall(imageBytes, width, height, stride = width)
+        assertNotNull("Centroid should be detected from mock detections", centroid)
+        assertEquals(1, mockRunner.runInvocationCount)
+        assertEquals(416 * 416 * 4, mockRunner.lastInputCapacity)
+    }
+
+    @Test
+    fun testDirectByteBufferDetectionAndSubpixelAccuracy() {
+        // Mock a bounding box in normalized coordinates:
+        // ymin = 0.70, xmin = 0.45, ymax = 0.76, xmax = 0.55
+        // Expected centroid: cx = 0.50, cy = 0.73
+        val mockBoxes = arrayOf(floatArrayOf(0.70f, 0.45f, 0.76f, 0.55f))
+        val mockScores = floatArrayOf(0.88f)
+        val mockRunner = MockTFLiteRunner(mockBoxes, mockScores)
+        val detector = TFLiteBallDetector.createForTesting(mockRunner)
+
+        val width = 1080
+        val height = 1920
+        val directBuffer = ByteBuffer.allocateDirect(width * height)
+        for (i in 0 until (width * height)) {
+            directBuffer.put(128.toByte())
+        }
+        directBuffer.rewind()
+
+        val result = detector.detect(directBuffer, width, height)
+        assertNotNull("Should detect ball from direct ByteBuffer", result)
+        assertEquals(0.88f, result!!.confidence, 0.001f)
+
+        val expectedScreenX = 0.50 * width   // 540.0
+        val expectedScreenY = 0.73 * height  // 1401.6
+
+        assertEquals(expectedScreenX, result.centroid.x, 0.01)
+        assertEquals(expectedScreenY, result.centroid.y, 0.01)
+        assertTrue("Latency should be non-negative", result.latencyMs >= 0.0)
+    }
+
+    @Test
+    fun testLowConfidenceRejection() {
+        // Mock detection below threshold (0.42 < 0.50)
+        val mockBoxes = arrayOf(floatArrayOf(0.50f, 0.50f, 0.60f, 0.60f))
+        val mockScores = floatArrayOf(0.42f)
+        val mockRunner = MockTFLiteRunner(mockBoxes, mockScores)
+        val detector = TFLiteBallDetector.createForTesting(mockRunner, confidenceThreshold = 0.50f)
+
+        val imageBytes = ByteArray(640 * 480) { 100.toByte() }
+        val centroid = detector.detectBall(imageBytes, 640, 480)
+        assertNull("Detections below confidence threshold must return null", centroid)
+    }
+
+    @Test
+    fun testParityComparisonWithOpticalBallDetector() {
+        // Setup shared lane homography
+        val calibrator = LaneCalibrator()
+        val foulLeft = Point2D(100.0, 1800.0)
+        val foulRight = Point2D(980.0, 1800.0)
+        val arrowsLeft = Point2D(300.0, 1000.0)
+        val arrowsRight = Point2D(780.0, 1000.0)
+        val (_, homography) = calibrator.calibrate(foulLeft, foulRight, arrowsLeft, arrowsRight)!!
+
+        val opticalDetector = OpticalBallDetector()
+        opticalDetector.updateHomography(homography)
+
+        val width = 1080
+        val height = 1920
+        val stride = width
+        val size = width * height
+
+        // 1. Prime optical detector baseline frame
+        val baselineFrame = ByteArray(size) { 100.toByte() }
+        opticalDetector.detectBall(baselineFrame, width, height, stride)
+
+        // 2. Synthesize ball at (540, 1400)
+        val targetX = 540
+        val targetY = 1400
+        val radius = 12
+
+        val testFrame = baselineFrame.copyOf()
+        for (y in (targetY - radius)..(targetY + radius)) {
+            for (x in (targetX - radius)..(targetX + radius)) {
+                val dx = x - targetX
+                val dy = y - targetY
+                if (dx * dx + dy * dy <= radius * radius) {
+                    testFrame[y * stride + x] = 220.toByte()
+                }
+            }
+        }
+
+        // Run Optical Detector
+        val opticalCentroid = opticalDetector.detectBall(testFrame, width, height, stride)
+        assertNotNull("Optical detector must detect ball", opticalCentroid)
+
+        // Configure ML Detector to predict the same region with high confidence
+        val normYmin = (targetY - radius).toFloat() / height
+        val normXmin = (targetX - radius).toFloat() / width
+        val normYmax = (targetY + radius).toFloat() / height
+        val normXmax = (targetX + radius).toFloat() / width
+
+        val mlRunner = MockTFLiteRunner(
+            mockBoxes = arrayOf(floatArrayOf(normYmin, normXmin, normYmax, normXmax)),
+            mockScores = floatArrayOf(0.95f)
+        )
+        val mlDetector = TFLiteBallDetector.createForTesting(mlRunner)
+
+        // Run ML Detector
+        val mlCentroid = mlDetector.detectBall(testFrame, width, height, stride)
+        assertNotNull("ML detector must detect ball", mlCentroid)
+
+        // 3. Parity assertion between classical optical differencing and ML detection
+        assertEquals("X coordinates between optical and ML must align within 5px",
+            opticalCentroid!!.x, mlCentroid!!.x, 5.0)
+        assertEquals("Y coordinates between optical and ML must align within 5px",
+            opticalCentroid.y, mlCentroid.y, 5.0)
+
+        // 4. Verification that both feed into TrajectoryTracker seamlessly
+        val tracker = TrajectoryTracker(homography)
+        val trajPoint1 = tracker.onBallCentroidDetected(opticalCentroid, 1000L)
+        tracker.reset()
+        val trajPoint2 = tracker.onBallCentroidDetected(mlCentroid, 1000L)
+
+        assertNotNull("Tracker should accept optical centroid", trajPoint1)
+        assertNotNull("Tracker should accept ML centroid", trajPoint2)
+        assertEquals(trajPoint1!!.xBoard, trajPoint2!!.xBoard, 0.5)
+        assertEquals(trajPoint1.yFt, trajPoint2.yFt, 0.5)
+    }
+
+    @Test
+    fun testBallDetectorEnginePolymorphism() {
+        val mockRunner = MockTFLiteRunner()
+        val engine: BallDetectorEngine = TFLiteBallDetector.createForTesting(mockRunner)
+
+        val imageBytes = ByteArray(320 * 320) { 120.toByte() }
+        val pt = engine.detectBall(imageBytes, 320, 320)
+        assertNotNull("Polymorphic call via BallDetectorEngine must succeed", pt)
+        assertTrue("Latency must be positive", engine.getLastInferenceLatencyMs() >= 0.0)
+    }
+}
