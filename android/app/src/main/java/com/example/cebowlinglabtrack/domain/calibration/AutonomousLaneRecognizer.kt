@@ -4,6 +4,7 @@ import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.LaneConstants
 import com.example.cebowlinglabtrack.domain.model.Point2D
+import com.example.cebowlinglabtrack.domain.ml.TFLiteBallDetector
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -78,7 +79,8 @@ class AutonomousLaneRecognizer(
         stride: Int = width,
         zoomRatio: Float = 1.0f,
         alignment: Handedness = Handedness.RIGHT,
-        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK,
+        tfliteDetector: TFLiteBallDetector? = null
     ): LaneRecognitionResult {
         val w = width.toDouble()
         val h = height.toDouble()
@@ -86,7 +88,33 @@ class AutonomousLaneRecognizer(
         val gutterName = if (alignment == Handedness.RIGHT) "RIGHT" else "LEFT"
 
         // 1. Stage 1: Detect Full 10-Pin Rack (Primary Environmental Anchor)
-        var pinRack = detectPinRack(imageBytes, width, height, stride, zoomRatio, alignment)
+        // Priority 1: Check Edge LiteRT 7-Class Model (class 1: pin_rack)
+        var pinRack: PinRackCandidate? = null
+        if (tfliteDetector != null) {
+            val mlRack = tfliteDetector.detectPinRack(imageBytes, width, height, stride)
+            if (mlRack != null && mlRack.confidence >= 0.25f) {
+                val box = mlRack.boundingBox
+                val topY = box[0].toDouble() * h
+                val bottomY = box[2].toDouble() * h
+                val leftX = box[1].toDouble() * w
+                val rightX = box[3].toDouble() * w
+                val widthPx = (rightX - leftX).coerceAtLeast(w * 0.08)
+                pinRack = PinRackCandidate(
+                    centerX = mlRack.centroid.x,
+                    topY = topY,
+                    bottomY = bottomY,
+                    widthPx = widthPx,
+                    pinPeakCount = 10,
+                    contrastRatio = 2.5,
+                    confidence = mlRack.confidence.toDouble()
+                )
+            }
+        }
+
+        // Priority 2: Fallback to Classical Adaptive Luminance Detection
+        if (pinRack == null) {
+            pinRack = detectPinRack(imageBytes, width, height, stride, zoomRatio, alignment)
+        }
         var gutters: GutterBoundaryLines? = null
 
         if (pinRack != null && pinRack.confidence >= 0.35) {
@@ -150,8 +178,21 @@ class AutonomousLaneRecognizer(
         val (minFoulPct, maxFoulPct) = if (zoomRatio >= 2.0f) Pair(0.65, 0.88) else Pair(0.45, 0.72)
         val minScanY = (h * minFoulPct).toInt()
         val maxScanY = (h * maxFoulPct).toInt()
-        val foulY = locateFoulLine(imageBytes, gutters, minScanY, maxScanY, width, height, stride)
-            ?: (h * if (zoomRatio >= 2.0f) 0.76 else 0.56).toInt()
+
+        var foulY: Int? = null
+        if (tfliteDetector != null) {
+            val mlFoul = tfliteDetector.detectLandmark(imageBytes, width, height, stride, classId = 3)
+            if (mlFoul != null && mlFoul.confidence >= 0.25f) {
+                val detectedY = mlFoul.centroid.y.toInt()
+                if (detectedY in (h * 0.40).toInt()..(h * 0.95).toInt()) {
+                    foulY = detectedY
+                }
+            }
+        }
+        if (foulY == null) {
+            foulY = locateFoulLine(imageBytes, gutters, minScanY, maxScanY, width, height, stride)
+                ?: (h * if (zoomRatio >= 2.0f) 0.76 else 0.56).toInt()
+        }
 
         // 4. Stage 4: Solve 4-point homography (0 ft to 60 ft) and project exact 15-ft arrows
         val pinDeckY = pinRack.bottomY

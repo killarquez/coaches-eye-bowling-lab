@@ -24,6 +24,8 @@ dist-ssr
 *.sw?
 scratch/
 dataset/
+dataset_multiclass/
+dataset_multiclass_test/
 runs/
 weights/
 *.pt

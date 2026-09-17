@@ -3,6 +3,7 @@ package com.example.cebowlinglabtrack.domain.calibration
 import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.Point2D
+import com.example.cebowlinglabtrack.domain.ml.TFLiteBallDetector
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -48,10 +49,11 @@ class AutoLaneDetector(
         stride: Int = width,
         zoomRatio: Float = 1.0f,
         alignment: Handedness = Handedness.RIGHT,
-        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK,
+        tfliteDetector: TFLiteBallDetector? = null
     ): AutoDetectionResult {
         // Run full hierarchical autonomous recognition (Pins -> Gutters -> Foul Line -> Arrows)
-        val recognition = laneRecognizer.recognizeLane(imageBytes, width, height, stride, zoomRatio, alignment, anchorMode)
+        val recognition = laneRecognizer.recognizeLane(imageBytes, width, height, stride, zoomRatio, alignment, anchorMode, tfliteDetector)
 
         val defaultArrowsPair = calibrator.createDefaultCalibration(
             viewWidth = width.toFloat(),

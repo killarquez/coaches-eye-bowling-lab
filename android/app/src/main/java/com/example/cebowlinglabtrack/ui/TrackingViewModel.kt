@@ -395,7 +395,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             stride = stride,
             zoomRatio = currentZoom,
             alignment = effectiveAlignment,
-            anchorMode = anchorMode
+            anchorMode = anchorMode,
+            tfliteDetector = tfliteBallDetector
         )
 
         if (result.isSuccess) {
