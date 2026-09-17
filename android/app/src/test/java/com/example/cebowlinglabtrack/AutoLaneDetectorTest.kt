@@ -360,6 +360,142 @@ class AutoLaneDetectorTest {
         assertTrue("Foul line Y should be below arrows", foulL.y > snappedArrows.y)
     }
 
+    @Test
+    fun testVerifyPinDeckEnforces80PercentCertainty() {
+        val recognizer = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer()
+        val width = 1000
+        val height = 1500
+        val stride = width
+
+        // 1. Pointing at blank wall/floor (uniform image, no pins)
+        val blankFrame = ByteArray(width * height) { 120.toByte() }
+        val fakeCandidate = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer.PinRackCandidate(
+            centerX = 500.0,
+            topY = 300.0,
+            bottomY = 330.0,
+            widthPx = 100.0,
+            pinPeakCount = 2,
+            contrastRatio = 1.1,
+            confidence = 0.35
+        )
+        val (blankVerified, blankCertainty) = recognizer.verifyPinDeckAt(
+            tappedPoint = com.example.cebowlinglabtrack.domain.model.Point2D(500.0, 330.0),
+            candidate = fakeCandidate,
+            imageBytes = blankFrame,
+            width = width,
+            height = height,
+            stride = stride
+        )
+        assertFalse("Blank wall without pins MUST NOT be verified", blankVerified)
+        assertTrue("Blank wall certainty must be < 80% (was $blankCertainty)", blankCertainty < 0.80)
+
+        // 2. Real pin rack with high contrast and >= 4 pin peaks
+        val validCandidate = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer.PinRackCandidate(
+            centerX = 500.0,
+            topY = 300.0,
+            bottomY = 330.0,
+            widthPx = 120.0,
+            pinPeakCount = 7,
+            contrastRatio = 2.8,
+            confidence = 0.92
+        )
+        val (pinVerified, pinCertainty) = recognizer.verifyPinDeckAt(
+            tappedPoint = com.example.cebowlinglabtrack.domain.model.Point2D(505.0, 332.0),
+            candidate = validCandidate,
+            imageBytes = null, // fallback logic
+            width = width,
+            height = height,
+            stride = stride
+        )
+        assertTrue("Valid pin rack candidate MUST be verified", pinVerified)
+        assertTrue("Valid pin rack certainty must be >= 80% (was $pinCertainty)", pinCertainty >= 0.80)
+    }
+
+    @Test
+    fun testVerifyArrowsEnforces80PercentCertainty() {
+        val recognizer = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer()
+        val width = 1000
+        val height = 1500
+        val stride = width
+
+        val validRack = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer.PinRackCandidate(
+            centerX = 500.0,
+            topY = 300.0,
+            bottomY = 330.0,
+            widthPx = 120.0,
+            pinPeakCount = 7,
+            contrastRatio = 2.8,
+            confidence = 0.92
+        )
+
+        // 1. Tapping above pin deck (e.g. ceiling at Y=100)
+        val (ceilingVerified, ceilingCertainty) = recognizer.verifyArrowsAt(
+            tappedPoint = com.example.cebowlinglabtrack.domain.model.Point2D(500.0, 100.0),
+            pinRack = validRack,
+            imageBytes = null,
+            width = width,
+            height = height,
+            stride = stride
+        )
+        assertFalse("Tapping above pins MUST NOT be verified as arrows", ceilingVerified)
+        assertTrue("Ceiling tap certainty must be < 80%", ceilingCertainty < 0.80)
+
+        // 2. Tapping far outside lane corridor (e.g. wall at X=50)
+        val (wallVerified, wallCertainty) = recognizer.verifyArrowsAt(
+            tappedPoint = com.example.cebowlinglabtrack.domain.model.Point2D(50.0, 700.0),
+            pinRack = validRack,
+            imageBytes = null,
+            width = width,
+            height = height,
+            stride = stride
+        )
+        assertFalse("Tapping far outside lane corridor MUST NOT be verified", wallVerified)
+        assertTrue("Wall tap certainty must be < 80%", wallCertainty < 0.80)
+
+        // 3. Tapping at authentic 15-ft arrows location (X=500, Y=700)
+        val (arrowsVerified, arrowsCertainty) = recognizer.verifyArrowsAt(
+            tappedPoint = com.example.cebowlinglabtrack.domain.model.Point2D(500.0, 700.0),
+            pinRack = validRack,
+            imageBytes = null,
+            width = width,
+            height = height,
+            stride = stride
+        )
+        assertTrue("Tapping authentic 15-ft arrows position MUST be verified", arrowsVerified)
+        assertTrue("Arrows certainty must be >= 80% (was $arrowsCertainty)", arrowsCertainty >= 0.80)
+    }
+
+    @Test
+    fun testVerifyLaneGeometryEnforces80PercentCertainty() {
+        val recognizer = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer()
+        val width = 1080.0
+        val height = 2340.0
+
+        // 1. Inverted / impossible geometry: Pin deck is wider than foul line
+        val (invertedVerified, invertedCertainty) = recognizer.verifyLaneGeometry(
+            flL = com.example.cebowlinglabtrack.domain.model.Point2D(350.0, 1800.0),
+            flR = com.example.cebowlinglabtrack.domain.model.Point2D(650.0, 1800.0), // foul width = 300
+            alL = com.example.cebowlinglabtrack.domain.model.Point2D(100.0, 500.0),
+            alR = com.example.cebowlinglabtrack.domain.model.Point2D(900.0, 500.0),  // deck width = 800 (inverted!)
+            width = width,
+            height = height
+        )
+        assertFalse("Inverted perspective geometry MUST NOT be verified", invertedVerified)
+        assertTrue("Inverted geometry certainty must be < 80%", invertedCertainty < 0.80)
+
+        // 2. Realistic perspective bowling lane geometry
+        val (validVerified, validCertainty) = recognizer.verifyLaneGeometry(
+            flL = com.example.cebowlinglabtrack.domain.model.Point2D(150.0, 1800.0),
+            flR = com.example.cebowlinglabtrack.domain.model.Point2D(930.0, 1800.0), // foul width = 780
+            alL = com.example.cebowlinglabtrack.domain.model.Point2D(440.0, 520.0),
+            alR = com.example.cebowlinglabtrack.domain.model.Point2D(640.0, 520.0),  // deck width = 200 (ratio = 0.256)
+            width = width,
+            height = height
+        )
+        assertTrue("Authentic converging bowling lane geometry MUST be verified", validVerified)
+        assertTrue("Valid geometry certainty must be >= 80% (was $validCertainty)", validCertainty >= 0.80)
+    }
+
     private fun assertEquals(expected: Any?, actual: Any?) {
         org.junit.Assert.assertEquals(expected, actual)
     }

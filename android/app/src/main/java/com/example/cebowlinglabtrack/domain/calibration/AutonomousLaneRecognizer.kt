@@ -804,6 +804,197 @@ class AutonomousLaneRecognizer(
     }
 
     /**
+     * Verifies whether a user tap or detection corresponds to a real 10-pin rack cluster with >= 80% certainty.
+     * Prevents user from tapping arbitrary background objects (walls, floor, ceiling).
+     */
+    fun verifyPinDeckAt(
+        tappedPoint: Point2D,
+        candidate: PinRackCandidate?,
+        imageBytes: ByteArray?,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): Pair<Boolean, Double> {
+        if (candidate == null) return Pair(false, 0.10)
+
+        // 1. Distance check from tap to candidate bottom center
+        val dx = tappedPoint.x - candidate.centerX
+        val dy = tappedPoint.y - candidate.bottomY
+        val tapDist = sqrt(dx * dx + dy * dy)
+        val maxDist = (candidate.widthPx * 1.5 + 80.0).coerceIn(120.0, 300.0)
+        if (tapDist > maxDist) {
+            return Pair(false, 0.25)
+        }
+
+        // 2. Base candidate confidence from peak extraction
+        var certainty = candidate.confidence
+
+        // 3. Minimum pin peaks and contrast check
+        if (candidate.pinPeakCount < 4) {
+            certainty *= 0.70
+        }
+        if (candidate.contrastRatio < 1.5) {
+            certainty *= 0.80
+        }
+
+        // 4. Optical buffer validation if frame is provided
+        if (imageBytes != null && width > 0 && height > 0) {
+            val cy = candidate.bottomY.toInt().coerceIn(0, height - 1)
+            val minX = (candidate.centerX - candidate.widthPx / 2.0).toInt().coerceIn(0, width - 1)
+            val maxX = (candidate.centerX + candidate.widthPx / 2.0).toInt().coerceIn(minX + 10, width - 1)
+            val rowOffset = cy * stride
+
+            var maxLum = 0
+            var minLum = 255
+            for (x in minX..maxX step 2) {
+                val idx = rowOffset + x
+                if (idx < imageBytes.size) {
+                    val lum = imageBytes[idx].toInt() and 0xFF
+                    if (lum > maxLum) maxLum = lum
+                    if (lum < minLum) minLum = lum
+                }
+            }
+            val dynamicRange = maxLum - minLum
+            if (dynamicRange < 25) {
+                certainty *= 0.40 // Uniform surface (wall or floor), not pins!
+            } else if (dynamicRange > 60 && maxLum > 110) {
+                certainty = (certainty * 1.05).coerceAtMost(0.98)
+            }
+        }
+
+        val isVerified = certainty >= 0.80
+        return Pair(isVerified, certainty)
+    }
+
+    /**
+     * Verifies that the tapped 15-ft arrows location respects perspective lane geometry and contrast with >= 80% certainty.
+     */
+    fun verifyArrowsAt(
+        tappedPoint: Point2D,
+        pinRack: PinRackCandidate,
+        imageBytes: ByteArray?,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): Pair<Boolean, Double> {
+        val w = width.toDouble()
+        val h = height.toDouble()
+
+        // 1. Geometric bounds check
+        val rackBaseY = pinRack.bottomY
+        if (tappedPoint.y <= rackBaseY + 30.0 || tappedPoint.y > h * 0.88) {
+            return Pair(false, 0.15) // Tapped above pins or behind bowler
+        }
+
+        val dx = abs(tappedPoint.x - pinRack.centerX)
+        if (dx > w * 0.32) {
+            return Pair(false, 0.20) // Tapped far outside lane corridor
+        }
+
+        // 2. Perspective vertical positioning: in lane perspective, 15ft arrows sit around 45%..65% of distance
+        val expectedY = rackBaseY + (h * 0.72 - rackBaseY) * 0.52
+        val yDiff = abs(tappedPoint.y - expectedY)
+        val geoScore = (1.0 - (yDiff / (h * 0.25))).coerceIn(0.0, 1.0)
+
+        // 3. Lateral corridor alignment
+        val xScore = (1.0 - (dx / (w * 0.25))).coerceIn(0.0, 1.0)
+
+        var certainty = 0.50 * geoScore + 0.35 * xScore + 0.10
+
+        // 4. Optical contrast validation around arrows
+        if (imageBytes != null && width > 0 && height > 0) {
+            val ay = tappedPoint.y.toInt().coerceIn(0, height - 1)
+            val ax = tappedPoint.x.toInt().coerceIn(20, width - 21)
+            val rowOffset = ay * stride
+
+            var gradSum = 0
+            for (offset in -15..15 step 3) {
+                val idx1 = rowOffset + ax + offset
+                val idx2 = rowOffset + ax + offset + 2
+                if (idx2 < imageBytes.size) {
+                    val v1 = imageBytes[idx1].toInt() and 0xFF
+                    val v2 = imageBytes[idx2].toInt() and 0xFF
+                    gradSum += abs(v2 - v1)
+                }
+            }
+            if (gradSum > 25) {
+                certainty = (certainty + 0.08).coerceAtMost(0.95)
+            }
+        }
+
+        val isVerified = certainty >= 0.80
+        return Pair(isVerified, certainty)
+    }
+
+    /**
+     * Verifies that the complete 4-corner lane trapezoid conforms to authentic perspective bowling lane invariants with >= 80% certainty.
+     */
+    fun verifyLaneGeometry(
+        flL: Point2D,
+        flR: Point2D,
+        alL: Point2D,
+        alR: Point2D,
+        width: Double,
+        height: Double,
+        anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK
+    ): Pair<Boolean, Double> {
+        val foulW = flR.x - flL.x
+        val topW = alR.x - alL.x
+
+        // Must be positive width
+        if (foulW < width * 0.20 || topW < width * 0.05) {
+            return Pair(false, 0.10)
+        }
+
+        // Inward convergence check: perspective requires lane to narrow towards the pins
+        val ratio = topW / foulW
+        val expectedRatioRange = if (anchorMode == CalibrationAnchorMode.PIN_DECK) 0.10..0.50 else 0.35..0.85
+        if (ratio !in expectedRatioRange) {
+            return Pair(false, 0.25)
+        }
+
+        // Left and right gutters must converge inwards
+        if (flL.x >= alL.x || flR.x <= alR.x) {
+            return Pair(false, 0.30)
+        }
+
+        // Foul line must be reasonably horizontal
+        val foulSlope = abs(flR.y - flL.y) / foulW
+        if (foulSlope > 0.15) {
+            return Pair(false, 0.40)
+        }
+
+        // Foul line must be located in lower half of screen
+        if (flL.y < height * 0.45 || flR.y < height * 0.45) {
+            return Pair(false, 0.35)
+        }
+
+        // Reprojection RMSE check using calibrator
+        val calibResult = calibrator.calibrate(
+            foulLineLeft = flL,
+            foulLineRight = flR,
+            arrowsLeft = alL,
+            arrowsRight = alR,
+            anchorMode = anchorMode
+        )
+        if (calibResult == null) {
+            return Pair(false, 0.20)
+        }
+
+        val rmse = calibResult.first.reprojectionErrorRmse
+        val rmseScore = (1.0 - (rmse / 2.0)).coerceIn(0.0, 1.0)
+
+        // Composite certainty score
+        val ratioScore = (1.0 - abs(ratio - 0.25) / 0.25).coerceIn(0.0, 1.0)
+        val levelScore = (1.0 - (foulSlope / 0.15)).coerceIn(0.0, 1.0)
+
+        val certainty = (0.35 * ratioScore + 0.35 * levelScore + 0.30 * rmseScore).coerceIn(0.0, 0.98)
+        val isVerified = certainty >= 0.80
+
+        return Pair(isVerified, certainty)
+    }
+
+    /**
      * Direct gutter line detection scanning middle/lower lane surface.
      * Operates as a fallback when pin rack lights are dim, colored, or obstructed.
      */

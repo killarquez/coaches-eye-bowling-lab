@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cebowlinglabtrack.domain.model.BallMetrics
+import com.example.cebowlinglabtrack.domain.model.RevTrackingMethod
 import com.example.cebowlinglabtrack.theme.DarkCardBorder
 import com.example.cebowlinglabtrack.theme.DarkSurface
 import com.example.cebowlinglabtrack.theme.ElectricAmber
@@ -29,6 +30,7 @@ import com.example.cebowlinglabtrack.theme.PowerCoral
 import com.example.cebowlinglabtrack.theme.TextMuted
 import com.example.cebowlinglabtrack.theme.TextPrimary
 import com.example.cebowlinglabtrack.theme.TextSecondary
+import com.example.cebowlinglabtrack.theme.UsbcGold
 
 /**
  * High-speed telemetry HUD card displaying key ball metrics.
@@ -83,25 +85,42 @@ fun TelemetryHUDCard(
                 label = "LAYDOWN",
                 value = metrics?.let { "B ${it.laydownBoard}" } ?: "--",
                 subLabel = "0 ft",
-                color = NeonCyan
+                color = NeonCyan,
+                modifier = Modifier.weight(1f)
             )
             TelemetryMetricPill(
                 label = "ARROWS",
                 value = metrics?.let { "B ${it.arrowBoard}" } ?: "--",
                 subLabel = "15 ft",
-                color = NeonCyan
+                color = NeonCyan,
+                modifier = Modifier.weight(1f)
             )
             TelemetryMetricPill(
                 label = "BREAKPOINT",
                 value = metrics?.let { "B ${it.breakpointBoard}" } ?: "--",
                 subLabel = metrics?.let { "${it.breakpointDistanceFt} ft" } ?: "-- ft",
-                color = ElectricAmber
+                color = ElectricAmber,
+                modifier = Modifier.weight(1.1f)
+            )
+            TelemetryMetricPill(
+                label = "REV RATE",
+                value = metrics?.let { "${it.rpm}" } ?: "--",
+                subLabel = metrics?.let {
+                    when (it.revTrackingMethod) {
+                        RevTrackingMethod.OPTICAL_TAPE -> "Tape"
+                        RevTrackingMethod.NATURAL_FEATURE -> "Feature"
+                        RevTrackingMethod.TRAJECTORY_ESTIMATE -> "Est"
+                    }
+                } ?: "rpm",
+                color = UsbcGold,
+                modifier = Modifier.weight(1f)
             )
             TelemetryMetricPill(
                 label = "ENTRY ANGLE",
                 value = metrics?.let { "${it.entryAngleDeg}°" } ?: "--°",
                 subLabel = "Pocket",
-                color = if ((metrics?.entryAngleDeg ?: 0.0) in 4.0..6.0) NeonStrikeGreen else PowerCoral
+                color = if ((metrics?.entryAngleDeg ?: 0.0) in 4.0..6.0) NeonStrikeGreen else PowerCoral,
+                modifier = Modifier.weight(1.1f)
             )
         }
     }
@@ -112,16 +131,17 @@ private fun TelemetryMetricPill(
     label: String,
     value: String,
     subLabel: String,
-    color: Color
+    color: Color,
+    modifier: Modifier = Modifier
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(horizontal = 4.dp)
+        modifier = modifier.padding(horizontal = 2.dp)
     ) {
-        Text(text = label, color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        Text(text = label, color = TextMuted, fontSize = 8.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         Spacer(modifier = Modifier.height(2.dp))
-        Text(text = value, color = color, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+        Text(text = value, color = color, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
         Spacer(modifier = Modifier.height(1.dp))
-        Text(text = subLabel, color = TextSecondary, fontSize = 9.sp)
+        Text(text = subLabel, color = TextSecondary, fontSize = 8.5.sp, maxLines = 1)
     }
 }

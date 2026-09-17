@@ -153,6 +153,7 @@ fun MainNavigation(
                         zoomRatio = uiState.zoomRatio,
                         autoCenterGuidance = uiState.autoCenterGuidance,
                         bowlerHandedness = uiState.activeBowler?.handedness ?: Handedness.RIGHT,
+                        tripodStatus = uiState.tripodStatus,
                         onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
                         onCalibrateDefault = { alignment -> viewModel.calibrateWithDefaults(alignment = alignment) },
                         onAutoDetectLaneDetailed = { bytes, w, h, s, alignment, mode ->
