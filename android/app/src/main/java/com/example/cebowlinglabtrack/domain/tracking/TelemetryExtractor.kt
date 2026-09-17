@@ -3,6 +3,7 @@ package com.example.cebowlinglabtrack.domain.tracking
 import com.example.cebowlinglabtrack.domain.model.BallMetrics
 import com.example.cebowlinglabtrack.domain.model.LaneConstants
 import com.example.cebowlinglabtrack.domain.model.Point2D
+import com.example.cebowlinglabtrack.domain.model.RevTrackingMethod
 import com.example.cebowlinglabtrack.domain.model.SpectoAngleMetrics
 import com.example.cebowlinglabtrack.domain.model.SpectoDynamicsMetrics
 import com.example.cebowlinglabtrack.domain.model.SpectoSpatialMetrics
@@ -122,7 +123,8 @@ object TelemetryExtractor {
             axisTiltDeg = opticalRevResult?.axisTiltDeg ?: 14.0,
             axisRotationDeg = opticalRevResult?.axisRotationDeg ?: 55.0,
             totalRotations = opticalRevResult?.totalRotations ?: ((finalRpm / 60.0) * totalDtSec),
-            isOpticalRevCounted = opticalRevResult?.isDetected ?: false
+            isOpticalRevCounted = opticalRevResult?.isDetected ?: false,
+            revTrackingMethod = opticalRevResult?.revTrackingMethod ?: RevTrackingMethod.TRAJECTORY_ESTIMATE
         )
 
         return SpectoTelemetry(

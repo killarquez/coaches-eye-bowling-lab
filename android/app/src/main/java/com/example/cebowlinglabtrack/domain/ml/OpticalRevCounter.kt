@@ -1,6 +1,8 @@
 package com.example.cebowlinglabtrack.domain.ml
 
 import com.example.cebowlinglabtrack.domain.model.Point2D
+import com.example.cebowlinglabtrack.domain.model.RevTrackingMethod
+import com.example.cebowlinglabtrack.domain.model.TapeColor
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.asin
@@ -35,7 +37,8 @@ class OpticalRevCounter(
         val axisRotationDeg: Double,
         val isDetected: Boolean,
         val confidence: Float,
-        val samplePointsCount: Int
+        val samplePointsCount: Int,
+        val revTrackingMethod: RevTrackingMethod = RevTrackingMethod.OPTICAL_TAPE
     )
 
     data class TapeObservation(
@@ -73,7 +76,8 @@ class OpticalRevCounter(
         stride: Int,
         ballCenter: Point2D,
         ballRadiusPx: Int,
-        timestampMs: Long
+        timestampMs: Long,
+        tapeColor: TapeColor = TapeColor.WHITE
     ): TapeObservation? {
         val r = ballRadiusPx.coerceIn(8, 60)
         val cx = ballCenter.x.toInt()
@@ -112,22 +116,39 @@ class OpticalRevCounter(
         val avgBallLum = (sumBallLum.toDouble() / ballPixelCount).toInt()
         val contrastDelta = maxBrightness - avgBallLum
 
-        // If highlight contrast over the ball body is weak (< 25), no tape is facing the camera
-        if (contrastDelta < 25) {
-            return null
+        // Min contrast threshold depends on tape color / natural features
+        val minContrastRequired = when (tapeColor) {
+            TapeColor.WHITE -> 22
+            TapeColor.NEON_GREEN -> 18
+            TapeColor.HOT_PINK -> 18
+            TapeColor.NO_TAPE -> 16 // Natural features (finger grips, logos, marbling)
         }
 
-        // Adaptive threshold: dynamically segments high-contrast tape across ball finishes
-        // Dark balls (lum ~30-60) -> threshold ~110-150
-        // Bright pearl balls (lum ~150-190) -> threshold ~190-240
-        val dynamicThreshold = (avgBallLum + (contrastDelta * 0.55).toInt()).coerceIn(110, 245)
+        if (contrastDelta < minContrastRequired) {
+            return null // Ball is featureless/matte or tape not facing camera
+        }
+
+        // Adaptive threshold ratio based on tape color
+        val thresholdFactor = when (tapeColor) {
+            TapeColor.WHITE -> 0.48
+            TapeColor.NEON_GREEN -> 0.40
+            TapeColor.HOT_PINK -> 0.35
+            TapeColor.NO_TAPE -> 0.44
+        }
+
+        val dynamicThreshold = (avgBallLum + (contrastDelta * thresholdFactor).toInt()).coerceIn(95, 245)
         val effectiveThreshold = if (useAdaptiveThreshold) dynamicThreshold else contrastThreshold
 
         var sumX = 0.0
         var sumY = 0.0
         var count = 0
 
-        // 2. Locate brightest high-contrast cluster inside circular ball boundary
+        var sumXAll = 0.0
+        var sumYAll = 0.0
+        var countAll = 0
+
+        // 2. Locate brightest high-contrast cluster inside circular ball boundary with top-pole glare suppression
+        // Overhead pinsetter light reflection creates a stationary specular glare spot near top pole (y < cy - 0.45*r, |x-cx| < 0.38*r)
         for (y in minY..maxY) {
             val rowOffset = y * stride
             val dy = y - cy
@@ -140,19 +161,33 @@ class OpticalRevCounter(
                 val pixelVal = imageBytes[idx].toInt() and 0xFF
 
                 if (pixelVal >= effectiveThreshold) {
-                    sumX += x
-                    sumY += y
-                    count++
+                    sumXAll += x
+                    sumYAll += y
+                    countAll++
+
+                    // Exclude stationary overhead ceiling light glare zone for white tape and natural features
+                    val isTopGlareZone = (dy < -0.42 * r) && (abs(dx) < 0.38 * r)
+                    if (!isTopGlareZone) {
+                        sumX += x
+                        sumY += y
+                        count++
+                    }
                 }
             }
         }
 
-        if (count < 4) {
-            return null // No tape marker visible in this orientation
+        // If tape was detected outside the static glare zone, use it (100% clean)
+        // If tape is currently rotating directly through the top pole, use the full count
+        val (finalSumX, finalSumY, finalCount) = if (count >= 4) {
+            Triple(sumX, sumY, count)
+        } else if (countAll >= 4) {
+            Triple(sumXAll, sumYAll, countAll)
+        } else {
+            return null
         }
 
-        val tapeCenterX = sumX / count
-        val tapeCenterY = sumY / count
+        val tapeCenterX = finalSumX / finalCount
+        val tapeCenterY = finalSumY / finalCount
 
         // 3. Compute 2D central image moments to calculate stripe orientation
         var mu20 = 0.0
@@ -232,10 +267,12 @@ class OpticalRevCounter(
      */
     fun evaluateShotRevRate(
         shotDurationMs: Long,
-        fallbackRpm: Int = 400
+        fallbackRpm: Int = 400,
+        tapeColor: TapeColor = TapeColor.WHITE
     ): OpticalRevResult {
-        if (observations.size < 6 || totalRotationsAcc < 0.5) {
-            // Insufficient optical tape samples; fall back to physics estimate
+        val minRevs = if (tapeColor == TapeColor.NO_TAPE) 0.35 else 0.40
+        if (observations.size < 6 || totalRotationsAcc < minRevs) {
+            // Insufficient optical surface samples; fall back to physics estimate
             return OpticalRevResult(
                 opticalRpm = fallbackRpm,
                 totalRotations = (fallbackRpm * (shotDurationMs / 60000.0)).coerceAtLeast(1.0),
@@ -243,7 +280,8 @@ class OpticalRevCounter(
                 axisRotationDeg = 55.0,
                 isDetected = false,
                 confidence = 0.0f,
-                samplePointsCount = observations.size
+                samplePointsCount = observations.size,
+                revTrackingMethod = RevTrackingMethod.TRAJECTORY_ESTIMATE
             )
         }
 
@@ -262,6 +300,11 @@ class OpticalRevCounter(
         // Calculate Axis Tilt and Axis Rotation from relative trajectory of the tape marker
         val (tiltDeg, rotDeg) = estimateTiltAndRotation()
 
+        val trackingMethod = when (tapeColor) {
+            TapeColor.NO_TAPE -> RevTrackingMethod.NATURAL_FEATURE
+            else -> RevTrackingMethod.OPTICAL_TAPE
+        }
+
         return OpticalRevResult(
             opticalRpm = measuredRpm,
             totalRotations = (totalShotRevs * 10.0).roundToInt() / 10.0,
@@ -269,7 +312,8 @@ class OpticalRevCounter(
             axisRotationDeg = rotDeg,
             isDetected = true,
             confidence = (observations.size / 30.0f).coerceIn(0.5f, 1.0f),
-            samplePointsCount = observations.size
+            samplePointsCount = observations.size,
+            revTrackingMethod = trackingMethod
         )
     }
 

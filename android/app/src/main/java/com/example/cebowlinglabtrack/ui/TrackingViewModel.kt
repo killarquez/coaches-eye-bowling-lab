@@ -26,6 +26,7 @@ import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.Point2D
 import com.example.cebowlinglabtrack.domain.model.ShotData
+import com.example.cebowlinglabtrack.domain.model.TapeColor
 import com.example.cebowlinglabtrack.domain.model.TargetComparisonResult
 import com.example.cebowlinglabtrack.domain.model.TrajectoryPoint
 import com.example.cebowlinglabtrack.domain.model.VisualTargetLine
@@ -310,8 +311,9 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         // 2. Transform detected ball centroid from camera buffer space to Compose screen space
         val screenCentroid = detectedCamCentroid?.let { transformer.cameraToScreen(it) }
 
-        // 3. If ball is detected, feed high-contrast tape sub-region into Optical Rev Counter (in camera buffer space)
+        // 3. If ball is detected, feed tape / natural feature sub-region into Optical Rev Counter (in camera buffer space)
         if (detectedCamCentroid != null && _uiState.value.isOpticalRevModeActive) {
+            val currentTapeColor = _uiState.value.activeBowler?.tapeColor ?: TapeColor.WHITE
             opticalRevCounter.processFrame(
                 imageBytes = imageBytes,
                 width = width,
@@ -319,7 +321,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 stride = stride,
                 ballCenter = detectedCamCentroid,
                 ballRadiusPx = ballRadiusPx,
-                timestampMs = timestampMs
+                timestampMs = timestampMs,
+                tapeColor = currentTapeColor
             )
         }
 
@@ -362,10 +365,12 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             (trajectory.last().timestampMs - trajectory.first().timestampMs).coerceAtLeast(1000L)
         } else 1800L
 
+        val currentTapeColor = _uiState.value.activeBowler?.tapeColor ?: TapeColor.WHITE
         val opticalRevResult = if (_uiState.value.isOpticalRevModeActive) {
             opticalRevCounter.evaluateShotRevRate(
                 shotDurationMs = durationMs,
-                fallbackRpm = _uiState.value.activeBowler?.benchmarkRpm ?: 400
+                fallbackRpm = _uiState.value.activeBowler?.benchmarkRpm ?: 400,
+                tapeColor = currentTapeColor
             )
         } else null
 

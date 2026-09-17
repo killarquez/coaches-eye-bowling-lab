@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.cebowlinglabtrack.domain.model.RevTrackingMethod
 import com.example.cebowlinglabtrack.domain.model.ShotData
 import com.example.cebowlinglabtrack.domain.model.TargetComparisonResult
 import com.example.cebowlinglabtrack.domain.model.VisualTargetLine
@@ -322,7 +323,12 @@ fun LaneTraxReviewView(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         LaneTraxMetricCard("Entry Board", "${sp.entryBoard}", "", cardBackground, cardBorder, Modifier.weight(1f))
-                        LaneTraxMetricCard("Rev Rate", "${dy.rpm}", "rpm", cardBackground, cardBorder, Modifier.weight(1f))
+                        val revBadge = when (dy.revTrackingMethod) {
+                            RevTrackingMethod.OPTICAL_TAPE -> "rpm • Tape"
+                            RevTrackingMethod.NATURAL_FEATURE -> "rpm • Feature"
+                            RevTrackingMethod.TRAJECTORY_ESTIMATE -> "rpm • Est"
+                        }
+                        LaneTraxMetricCard("Rev Rate", "${dy.rpm}", revBadge, cardBackground, cardBorder, Modifier.weight(1f))
                     }
 
                     Row(

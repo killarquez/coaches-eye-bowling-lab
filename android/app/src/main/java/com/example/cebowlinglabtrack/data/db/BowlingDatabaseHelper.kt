@@ -13,6 +13,7 @@ import com.example.cebowlinglabtrack.domain.model.LaneCalibration
 import com.example.cebowlinglabtrack.domain.model.Point2D
 import com.example.cebowlinglabtrack.domain.model.ShotData
 import com.example.cebowlinglabtrack.domain.model.SpectoTelemetry
+import com.example.cebowlinglabtrack.domain.model.TapeColor
 import com.example.cebowlinglabtrack.domain.model.TrajectoryPoint
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -49,7 +50,8 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 sessions_coached INTEGER,
                 last_session_date TEXT,
                 primary_goal TEXT,
-                notes TEXT
+                notes TEXT,
+                tape_color TEXT DEFAULT 'WHITE'
             )
             """.trimIndent()
         )
@@ -216,6 +218,11 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
             db.execSQL("UPDATE calibrations SET anchor_mode = 'PIN_DECK'")
         } catch (e: Exception) {
         }
+        try {
+            db.execSQL("ALTER TABLE bowlers ADD COLUMN tape_color TEXT DEFAULT 'WHITE'")
+        } catch (e: Exception) {
+            // Column may already exist
+        }
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -247,6 +254,7 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
             put("last_session_date", bowler.lastSessionDate)
             put("primary_goal", bowler.primaryGoal)
             put("notes", bowler.notes)
+            put("tape_color", bowler.tapeColor.name)
         }
         db.insertWithOnConflict("bowlers", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -537,6 +545,8 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
         val lastSessionDate = c.getString(c.getColumnIndexOrThrow("last_session_date")) ?: ""
         val primaryGoal = c.getString(c.getColumnIndexOrThrow("primary_goal")) ?: ""
         val notes = c.getString(c.getColumnIndexOrThrow("notes")) ?: ""
+        val tapeColorStr = runCatching { c.getString(c.getColumnIndexOrThrow("tape_color")) }.getOrNull()
+        val tapeColor = runCatching { TapeColor.valueOf(tapeColorStr ?: "") }.getOrDefault(TapeColor.WHITE)
 
         return BowlerProfile(
             id = id,
@@ -557,7 +567,8 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
             totalSessionsCoached = sessionsCoached,
             lastSessionDate = lastSessionDate,
             primaryGoal = primaryGoal,
-            notes = notes
+            notes = notes,
+            tapeColor = tapeColor
         )
     }
 

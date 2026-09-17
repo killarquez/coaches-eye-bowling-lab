@@ -5,6 +5,8 @@ import com.example.cebowlinglabtrack.domain.model.BowlerProfile
 import com.example.cebowlinglabtrack.domain.model.BowlingStyle
 import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.Point2D
+import com.example.cebowlinglabtrack.domain.model.RevTrackingMethod
+import com.example.cebowlinglabtrack.domain.model.TapeColor
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -266,5 +268,163 @@ class OpticalRevCounterAndRosterTest {
         val result = counter.evaluateShotRevRate(shotDurationMs = 1800L, fallbackRpm = 400)
         assertTrue("Adaptive threshold must cleanly isolate tape from bright pearl ball body", result.isDetected)
         assertTrue("RPM should be measured near 480 (actual: ${result.opticalRpm})", result.opticalRpm in 380..580)
+    }
+
+    @Test
+    fun testTapeColorSelectionAndTrackingMethod() {
+        val counter = OpticalRevCounter(contrastThreshold = 180, targetFps = 120.0, useAdaptiveThreshold = true)
+        counter.reset()
+
+        val width = 200
+        val height = 200
+        val stride = width
+        val ballCenter = Point2D(100.0, 100.0)
+        val ballRadius = 25
+
+        val targetRpm = 450.0
+        val revsPerSec = targetRpm / 60.0
+        val angularVelocityRadPerSec = revsPerSec * 2.0 * PI
+        val dtMs = 8L
+
+        for (frame in 0 until 40) {
+            val frameTimeMs = frame * dtMs
+            val currentAngle = (frameTimeMs / 1000.0) * angularVelocityRadPerSec
+            val buffer = ByteArray(width * height) { 35.toByte() }
+
+            val tapeLength = 15
+            for (dist in 4..tapeLength) {
+                val px = (ballCenter.x + dist * cos(currentAngle)).toInt()
+                val py = (ballCenter.y + dist * sin(currentAngle)).toInt()
+                if (px in 0 until width && py in 0 until height) {
+                    buffer[py * stride + px] = 200.toByte()
+                }
+            }
+
+            counter.processFrame(
+                imageBytes = buffer,
+                width = width,
+                height = height,
+                stride = stride,
+                ballCenter = ballCenter,
+                ballRadiusPx = ballRadius,
+                timestampMs = frameTimeMs,
+                tapeColor = TapeColor.NEON_GREEN
+            )
+        }
+
+        val result = counter.evaluateShotRevRate(shotDurationMs = 1800L, fallbackRpm = 400, tapeColor = TapeColor.NEON_GREEN)
+        assertTrue("Neon green tape should be detected", result.isDetected)
+        assertEquals("Tracking method should be OPTICAL_TAPE", RevTrackingMethod.OPTICAL_TAPE, result.revTrackingMethod)
+        assertTrue("RPM should be near 450 (actual: ${result.opticalRpm})", result.opticalRpm in 350..550)
+    }
+
+    @Test
+    fun testUntapedBallNaturalFeatureDetection() {
+        val counter = OpticalRevCounter(contrastThreshold = 180, targetFps = 120.0, useAdaptiveThreshold = true)
+        counter.reset()
+
+        val width = 200
+        val height = 200
+        val stride = width
+        val ballCenter = Point2D(100.0, 100.0)
+        val ballRadius = 25
+
+        // Natural feature: contrasting finger insert or pearl swirl orbiting ball
+        val targetRpm = 430.0
+        val revsPerSec = targetRpm / 60.0
+        val angularVelocityRadPerSec = revsPerSec * 2.0 * PI
+        val dtMs = 8L
+
+        for (frame in 0 until 40) {
+            val frameTimeMs = frame * dtMs
+            val currentAngle = (frameTimeMs / 1000.0) * angularVelocityRadPerSec
+            // Dark solid coverstock = 40
+            val buffer = ByteArray(width * height) { 40.toByte() }
+
+            // Feature spot (e.g. bright finger insert or engraving) at radius 12
+            val fx = (ballCenter.x + 12 * cos(currentAngle)).toInt()
+            val fy = (ballCenter.y + 12 * sin(currentAngle)).toInt()
+            for (dy in -2..2) {
+                for (dx in -2..2) {
+                    val px = fx + dx
+                    val py = fy + dy
+                    if (px in 0 until width && py in 0 until height) {
+                        buffer[py * stride + px] = 120.toByte() // Distinct contrast from 40
+                    }
+                }
+            }
+
+            counter.processFrame(
+                imageBytes = buffer,
+                width = width,
+                height = height,
+                stride = stride,
+                ballCenter = ballCenter,
+                ballRadiusPx = ballRadius,
+                timestampMs = frameTimeMs,
+                tapeColor = TapeColor.NO_TAPE
+            )
+        }
+
+        val result = counter.evaluateShotRevRate(shotDurationMs = 1800L, fallbackRpm = 400, tapeColor = TapeColor.NO_TAPE)
+        assertTrue("Natural feature should be detected when untaped", result.isDetected)
+        assertEquals("Tracking method should be NATURAL_FEATURE", RevTrackingMethod.NATURAL_FEATURE, result.revTrackingMethod)
+        assertTrue("RPM should be near 430 (actual: ${result.opticalRpm})", result.opticalRpm in 320..540)
+    }
+
+    @Test
+    fun testUntapedBallSolidMatteFallbackToTrajectory() {
+        val counter = OpticalRevCounter(contrastThreshold = 180, targetFps = 120.0, useAdaptiveThreshold = true)
+        counter.reset()
+
+        val width = 200
+        val height = 200
+        val stride = width
+        val ballCenter = Point2D(100.0, 100.0)
+        val ballRadius = 25
+        val dtMs = 8L
+
+        // Uniform matte black ball with zero surface contrast
+        for (frame in 0 until 40) {
+            val frameTimeMs = frame * dtMs
+            val buffer = ByteArray(width * height) { 40.toByte() }
+
+            counter.processFrame(
+                imageBytes = buffer,
+                width = width,
+                height = height,
+                stride = stride,
+                ballCenter = ballCenter,
+                ballRadiusPx = ballRadius,
+                timestampMs = frameTimeMs,
+                tapeColor = TapeColor.NO_TAPE
+            )
+        }
+
+        val result = counter.evaluateShotRevRate(shotDurationMs = 1800L, fallbackRpm = 415, tapeColor = TapeColor.NO_TAPE)
+        assertFalse("Featureless matte ball should not report optical lock", result.isDetected)
+        assertEquals("Should fall back to TRAJECTORY_ESTIMATE method", RevTrackingMethod.TRAJECTORY_ESTIMATE, result.revTrackingMethod)
+        assertEquals("Should fall back to calculated/benchmark RPM", 415, result.opticalRpm)
+    }
+
+    @Test
+    fun testBowlerProfileWithTapeColorSerialization() {
+        val profile = BowlerProfile(
+            id = "CEB-105",
+            name = "Sarah Jenkins",
+            heightInches = 66.0,
+            handedness = Handedness.RIGHT,
+            style = BowlingStyle.TWO_HANDED,
+            tapeColor = TapeColor.HOT_PINK
+        )
+
+        val serialized = json.encodeToString(profile)
+        val deserialized = json.decodeFromString<BowlerProfile>(serialized)
+
+        assertEquals(TapeColor.HOT_PINK, deserialized.tapeColor)
+
+        // Default should be WHITE
+        val defaultProfile = BowlerProfile(id = "CEB-106", name = "Dan")
+        assertEquals(TapeColor.WHITE, defaultProfile.tapeColor)
     }
 }

@@ -73,6 +73,7 @@ import com.example.cebowlinglabtrack.domain.model.BowlerProfile
 import com.example.cebowlinglabtrack.domain.model.BowlingStyle
 import com.example.cebowlinglabtrack.domain.model.Handedness
 import com.example.cebowlinglabtrack.domain.model.ShotData
+import com.example.cebowlinglabtrack.domain.model.TapeColor
 import com.example.cebowlinglabtrack.theme.DarkBackground
 import com.example.cebowlinglabtrack.theme.DarkCardBorder
 import com.example.cebowlinglabtrack.theme.DarkCardBorderGold
@@ -562,6 +563,38 @@ private fun AthleteProfileCard(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "REV TRACKING SETUP",
+                    color = TextMuted,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = UsbcNavyLight,
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, UsbcGold)
+                ) {
+                    Text(
+                        text = when (bowler.tapeColor) {
+                            TapeColor.WHITE -> "⚪ White Tape"
+                            TapeColor.NEON_GREEN -> "🟢 Neon Green Tape"
+                            TapeColor.HOT_PINK -> "🟣 Hot Pink Tape"
+                            TapeColor.NO_TAPE -> "🚫 Untaped (Auto-Feature / Physics)"
+                        },
+                        color = UsbcGold,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -861,6 +894,7 @@ private fun AddBowlerDialog(
     var speed by remember { mutableStateOf(existingBowler?.benchmarkSpeedMph?.toString() ?: "16.0") }
     var rpm by remember { mutableStateOf(existingBowler?.benchmarkRpm?.toString() ?: "420") }
     var primaryGoal by remember { mutableStateOf(existingBowler?.primaryGoal ?: "Rev Rate & Ball Speed Synchronization") }
+    var tapeColor by remember { mutableStateOf(existingBowler?.tapeColor ?: TapeColor.WHITE) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1011,6 +1045,39 @@ private fun AddBowlerDialog(
                     label = { Text("Primary Training Goal") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Rev Tracking Setup Selector
+                Text("Optical Rev Tracking Setup:", color = TextSecondary, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TapeColor.values().forEach { tc ->
+                        val isSel = tapeColor == tc
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSel) UsbcNavyLight else DarkSurface,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) UsbcGold else DarkCardBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { tapeColor = tc }
+                        ) {
+                            Text(
+                                text = when (tc) {
+                                    TapeColor.WHITE -> "⚪ White"
+                                    TapeColor.NEON_GREEN -> "🟢 Green"
+                                    TapeColor.HOT_PINK -> "🟣 Pink"
+                                    TapeColor.NO_TAPE -> "🚫 None"
+                                },
+                                color = if (isSel) UsbcGold else TextMuted,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1029,7 +1096,8 @@ private fun AddBowlerDialog(
                         papCoordinates = papCoordinates.trim(),
                         benchmarkSpeedMph = speed.toDoubleOrNull() ?: 16.0,
                         benchmarkRpm = rpm.toIntOrNull() ?: 420,
-                        primaryGoal = primaryGoal.trim()
+                        primaryGoal = primaryGoal.trim(),
+                        tapeColor = tapeColor
                     )
                     onSave(updated)
                 },

@@ -58,6 +58,27 @@ data class SpectoSpeedMetrics(
 )
 
 /**
+ * Tape color options for optical ball rotation tracking.
+ */
+@Serializable
+enum class TapeColor(val displayName: String, val chipColorHex: Long) {
+    WHITE("White Tape", 0xFFE0E0E0),
+    NEON_GREEN("Neon Green / Lime", 0xFF39FF14),
+    HOT_PINK("Hot Pink / Magenta", 0xFFFF1493),
+    NO_TAPE("No Tape (Auto / Physics)", 0xFF888888)
+}
+
+/**
+ * Method used to measure or calculate shot rev rate.
+ */
+@Serializable
+enum class RevTrackingMethod(val label: String) {
+    OPTICAL_TAPE("Optical (Tape)"),
+    NATURAL_FEATURE("Optical (Natural Feature)"),
+    TRAJECTORY_ESTIMATE("Specto Trajectory Est")
+}
+
+/**
  * Specto Telemetry - Ball Motion Phases & Dynamics.
  */
 @Serializable
@@ -73,7 +94,8 @@ data class SpectoDynamicsMetrics(
     @SerialName("axis_tilt_deg") val axisTiltDeg: Double = 14.0,
     @SerialName("axis_rotation_deg") val axisRotationDeg: Double = 55.0,
     @SerialName("total_rotations") val totalRotations: Double = 14.0,
-    @SerialName("is_optical_rev_counted") val isOpticalRevCounted: Boolean = false
+    @SerialName("is_optical_rev_counted") val isOpticalRevCounted: Boolean = false,
+    @SerialName("rev_tracking_method") val revTrackingMethod: RevTrackingMethod = RevTrackingMethod.TRAJECTORY_ESTIMATE
 )
 
 /**
@@ -141,7 +163,8 @@ data class ShotData(
         axisRotationDeg = spectoTelemetry.dynamics.axisRotationDeg,
         rpm = spectoTelemetry.dynamics.rpm,
         totalRotations = spectoTelemetry.dynamics.totalRotations,
-        isOpticalRevCounted = spectoTelemetry.dynamics.isOpticalRevCounted
+        isOpticalRevCounted = spectoTelemetry.dynamics.isOpticalRevCounted,
+        revTrackingMethod = spectoTelemetry.dynamics.revTrackingMethod
     )
 }
 
@@ -161,7 +184,8 @@ data class BallMetrics(
     val axisRotationDeg: Double = 55.0,
     val rpm: Int = 435,
     val totalRotations: Double = 14.0,
-    val isOpticalRevCounted: Boolean = false
+    val isOpticalRevCounted: Boolean = false,
+    val revTrackingMethod: RevTrackingMethod = RevTrackingMethod.TRAJECTORY_ESTIMATE
 )
 
 /**
@@ -251,6 +275,7 @@ data class BowlerProfile(
     val totalSessionsCoached: Int = 2,
     val lastSessionDate: String = "2026-09-02",
     val primaryGoal: String = "Rev Rate & Ball Speed Synchronization",
+    val tapeColor: TapeColor = TapeColor.WHITE,
     val notes: String = ""
 )
 
