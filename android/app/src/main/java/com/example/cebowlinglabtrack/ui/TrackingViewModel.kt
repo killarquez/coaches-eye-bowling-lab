@@ -81,7 +81,10 @@ data class TrackingUiState(
     val guttersDetected: Boolean = false,
     val virtualVideoBitmap: Bitmap? = null,
     val isPlayingVideoFeed: Boolean = false,
-    val videoFeedStatus: String? = null
+    val videoFeedStatus: String? = null,
+    val cameraStabilityScore: Int = 100,
+    val isCameraDrifted: Boolean = false,
+    val cameraStabilityMessage: String = "LANE LOCKED • 100% STABLE"
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -89,6 +92,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     private val repository = BowlingRepository(application)
     private val calibrator = LaneCalibrator()
     private val autoLaneDetector = AutoLaneDetector(calibrator)
+    private val laneRecognizer = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer(calibrator)
+    private val laneStabilityVerifier = com.example.cebowlinglabtrack.domain.calibration.LaneStabilityVerifier()
 
     private var homography: HomographyMatrix = HomographyMatrix.identity()
     private val trajectoryTracker = TrajectoryTracker(homography)
@@ -393,6 +398,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             repository.saveShot(completedShot)
+            val stabilityReport = verifyCameraStabilityInternal()
             _uiState.value = _uiState.value.copy(
                 activeShot = completedShot,
                 liveTrajectory = trajectory,
@@ -402,7 +408,10 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 pinfallResult = pinResult,
                 standingPins = pinResult.standingPins,
                 ballNumber = pinResult.ballNumber,
-                targetComparison = targetComp
+                targetComparison = targetComp,
+                cameraStabilityScore = stabilityReport?.scorePercent ?: _uiState.value.cameraStabilityScore,
+                isCameraDrifted = stabilityReport?.let { !it.isStable } ?: _uiState.value.isCameraDrifted,
+                cameraStabilityMessage = stabilityReport?.statusMessage ?: _uiState.value.cameraStabilityMessage
             )
         }
     }
@@ -467,6 +476,16 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             ensureCameraHomographySynced(width.toFloat(), height.toFloat())
             val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
 
+            laneStabilityVerifier.captureReferenceLandmarks(
+                frameBytes = imageBytes,
+                width = width,
+                height = height,
+                stride = stride,
+                foulLineLeft = calib.foulLineLeftScreen,
+                foulLineRight = calib.foulLineRightScreen,
+                arrowsCenter = newH.projectLaneToPixel(20.0, 15.0)
+            )
+
             _uiState.value = _uiState.value.copy(
                 calibration = calib,
                 isLaneCalibrated = true,
@@ -476,7 +495,10 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 laneRecognitionStatus = result.statusMessage,
                 autoCenterGuidance = result.autoCenterGuidance,
                 pinRackDetected = result.pinRackDetected,
-                guttersDetected = result.guttersDetected
+                guttersDetected = result.guttersDetected,
+                cameraStabilityScore = 100,
+                isCameraDrifted = false,
+                cameraStabilityMessage = "LANE LOCKED • 100% STABLE"
             )
 
             viewModelScope.launch {
@@ -586,13 +608,17 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         trajectoryTracker.reset()
         opticalBallDetector.resetBaseline()
         opticalRevCounter.reset()
+        val stabilityReport = verifyCameraStabilityInternal()
         _uiState.value = _uiState.value.copy(
             activeShot = null,
             liveTrajectory = emptyList(),
             liveMetrics = null,
             targetComparison = null,
             trackingState = TrackingState.IDLE,
-            isSimulating = false
+            isSimulating = false,
+            cameraStabilityScore = stabilityReport?.scorePercent ?: _uiState.value.cameraStabilityScore,
+            isCameraDrifted = stabilityReport?.let { !it.isStable } ?: _uiState.value.isCameraDrifted,
+            cameraStabilityMessage = stabilityReport?.statusMessage ?: _uiState.value.cameraStabilityMessage
         )
     }
 
@@ -649,16 +675,103 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
         val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
 
+        // Capture reference landmarks for post-shot camera stability check
+        val frame = latestFrame
+        if (frame != null && latestWidth > 0 && latestHeight > 0) {
+            val s = if (latestStride > 0) latestStride else latestWidth
+            laneStabilityVerifier.captureReferenceLandmarks(
+                frameBytes = frame,
+                width = latestWidth,
+                height = latestHeight,
+                stride = s,
+                foulLineLeft = foulLeft,
+                foulLineRight = foulRight,
+                arrowsCenter = newH.projectLaneToPixel(20.0, 15.0)
+            )
+        }
+
         _uiState.value = _uiState.value.copy(
             calibration = calib,
             isLaneCalibrated = true,
             calibrationQuality = "CALIBRATED (${anchorMode.displayName})",
-            projectedGuides = guides
+            projectedGuides = guides,
+            cameraStabilityScore = 100,
+            isCameraDrifted = false,
+            cameraStabilityMessage = "LANE LOCKED • 100% STABLE"
         )
 
         viewModelScope.launch {
             repository.saveCalibration(calib)
         }
+    }
+
+    /**
+     * Verifies post-shot camera stability using Normalized Cross-Correlation (NCC).
+     * If minor floor jitter is detected (70% - 84%), smoothly auto-corrects translation offset.
+     * If severe drift is detected (< 70%), sets isCameraDrifted = true.
+     */
+    fun verifyCameraStability(): com.example.cebowlinglabtrack.domain.calibration.LaneStabilityVerifier.StabilityReport? {
+        val report = verifyCameraStabilityInternal() ?: return null
+        _uiState.value = _uiState.value.copy(
+            cameraStabilityScore = report.scorePercent,
+            isCameraDrifted = !report.isStable,
+            cameraStabilityMessage = report.statusMessage
+        )
+        return report
+    }
+
+    private fun verifyCameraStabilityInternal(): com.example.cebowlinglabtrack.domain.calibration.LaneStabilityVerifier.StabilityReport? {
+        val frame = latestFrame ?: return null
+        if (!laneStabilityVerifier.isInitialized || latestWidth <= 0 || latestHeight <= 0) return null
+        val s = if (latestStride > 0) latestStride else latestWidth
+        val report = laneStabilityVerifier.verifyStability(frame, latestWidth, latestHeight, s)
+
+        // Micro-jitter auto-correction (70% - 84%)
+        if (report.scorePercent in 70..84 && (kotlin.math.abs(report.offsetDx) > 0.5f || kotlin.math.abs(report.offsetDy) > 0.5f)) {
+            val shiftedH = homography.translate(report.offsetDx.toDouble(), report.offsetDy.toDouble())
+            homography = shiftedH
+            trajectoryTracker.updateHomography(shiftedH)
+            val guides = calibrator.generateProjectedGuides(shiftedH, _uiState.value.activeTargetLine)
+            _uiState.value = _uiState.value.copy(projectedGuides = guides)
+        }
+        return report
+    }
+
+    /**
+     * Re-baselines the camera stability reference templates to the current camera position,
+     * dismissing the camera drift warning without requiring full recalibration.
+     */
+    fun rebaselineCameraStability() {
+        val frame = latestFrame ?: return
+        val calib = _uiState.value.calibration ?: return
+        val s = if (latestStride > 0) latestStride else latestWidth
+        laneStabilityVerifier.captureReferenceLandmarks(
+            frameBytes = frame,
+            width = latestWidth,
+            height = latestHeight,
+            stride = s,
+            foulLineLeft = calib.foulLineLeftScreen,
+            foulLineRight = calib.foulLineRightScreen,
+            arrowsCenter = homography.projectLaneToPixel(20.0, 15.0)
+        )
+        _uiState.value = _uiState.value.copy(
+            cameraStabilityScore = 100,
+            isCameraDrifted = false,
+            cameraStabilityMessage = "✓ CAMERA POSITION RE-LOCKED (100%)"
+        )
+    }
+
+    /**
+     * Finds all candidate 7-pin racks across the full width of the most recent camera frame,
+     * enabling multi-lane selection in the guided calibration wizard.
+     */
+    fun findAllPinRacksFromLatestFrame(): List<com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer.PinRackCandidate> {
+        val frame = latestFrame ?: return emptyList()
+        val w = latestWidth
+        val h = latestHeight
+        val s = if (latestStride > 0) latestStride else w
+        if (w <= 0 || h <= 0) return emptyList()
+        return laneRecognizer.findAllPinRacks(frame, w, h, s, _uiState.value.zoomRatio, tfliteBallDetector)
     }
 
     /**

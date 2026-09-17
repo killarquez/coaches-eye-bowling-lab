@@ -557,6 +557,253 @@ class AutonomousLaneRecognizer(
     }
 
     /**
+     * Detects all candidate 10-pin racks (7 visible pin columns) across the entire field of view.
+     * Disregards single-lane corridor isolation so the user can interactively select their exact lane.
+     */
+    fun findAllPinRacks(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width,
+        zoomRatio: Float = 1.0f,
+        tfliteDetector: com.example.cebowlinglabtrack.domain.ml.TFLiteBallDetector? = null
+    ): List<PinRackCandidate> {
+        val w = width.toDouble()
+        val h = height.toDouble()
+        val results = mutableListOf<PinRackCandidate>()
+
+        // 1. Edge LiteRT ML Detector detections
+        if (tfliteDetector != null) {
+            val allMlRacks = tfliteDetector.detectAllPinRacks(imageBytes, width, height, stride)
+            for (mlRack in allMlRacks) {
+                if (mlRack.confidence >= 0.15f) {
+                    val box = mlRack.boundingBox
+                    val topY = box[0].toDouble() * h
+                    val bottomY = box[2].toDouble() * h
+                    val leftX = box[1].toDouble() * w
+                    val rightX = box[3].toDouble() * w
+                    val widthPx = (rightX - leftX).coerceAtLeast(60.0)
+                    val centerX = (leftX + rightX) / 2.0
+                    results.add(
+                        PinRackCandidate(
+                            centerX = centerX,
+                            topY = topY,
+                            bottomY = bottomY,
+                            widthPx = widthPx,
+                            pinPeakCount = 7,
+                            contrastRatio = 2.5,
+                            confidence = mlRack.confidence.toDouble()
+                        )
+                    )
+                }
+            }
+        }
+
+        // 2. Optical 7-Pin Cluster peak extraction across horizontal rows
+        val minScanY = (h * 0.08).toInt().coerceIn(0, height - 1)
+        val maxScanY = (h * if (zoomRatio >= 2.0f) 0.58 else 0.54).toInt().coerceIn(minScanY + 10, height - 1)
+        val opticalCandidates = mutableListOf<PinRackCandidate>()
+
+        val rowStep = 3
+        for (y in minScanY..maxScanY step rowStep) {
+            val rowOffset = y * stride
+            if (rowOffset + width > imageBytes.size) break
+
+            val minX = (w * 0.05).toInt()
+            val maxX = (w * 0.95).toInt()
+
+            var rowMax = 0
+            for (x in minX..maxX step 4) {
+                val lum = imageBytes[rowOffset + x].toInt() and 0xFF
+                if (lum > rowMax) rowMax = lum
+            }
+            if (rowMax < 90) continue
+
+            val peakThreshold = max(90, (rowMax * 0.65).toInt())
+            val peaks = mutableListOf<Int>()
+            var prevLum = imageBytes[rowOffset + minX].toInt() and 0xFF
+            var isRising = false
+
+            for (x in (minX + 1)..maxX) {
+                val lum = imageBytes[rowOffset + x].toInt() and 0xFF
+                if (lum > prevLum) {
+                    isRising = true
+                } else if (lum < prevLum && isRising) {
+                    if (prevLum >= peakThreshold) {
+                        peaks.add(x - 1)
+                    }
+                    isRising = false
+                }
+                prevLum = lum
+            }
+
+            if (peaks.size < 4) continue
+
+            val clusters = mutableListOf<MutableList<Int>>()
+            var currentCluster = mutableListOf<Int>()
+
+            for (p in peaks) {
+                if (currentCluster.isEmpty()) {
+                    currentCluster.add(p)
+                } else {
+                    val gap = p - currentCluster.last()
+                    if (gap in 10..48) {
+                        currentCluster.add(p)
+                    } else if (gap > 48) {
+                        if (currentCluster.size >= 4) {
+                            clusters.add(currentCluster)
+                        }
+                        currentCluster = mutableListOf(p)
+                    }
+                }
+            }
+            if (currentCluster.size >= 4) {
+                clusters.add(currentCluster)
+            }
+
+            for (c in clusters) {
+                val xMin = c.first()
+                val xMax = c.last()
+                val rackWidth = (xMax - xMin).toDouble()
+                val expectedWidth = w * (0.09 + 0.06 * (zoomRatio - 1.0f).coerceIn(0f, 2.5f))
+
+                if (rackWidth in (expectedWidth * 0.55)..(expectedWidth * 2.5)) {
+                    val pad = (rackWidth * 0.06).coerceAtLeast(6.0)
+                    val boundedLeft = (xMin - pad).coerceAtLeast(0.0)
+                    val boundedRight = (xMax + pad).coerceAtMost(w - 1.0)
+                    val finalWidth = boundedRight - boundedLeft
+                    val finalCenter = (boundedLeft + boundedRight) / 2.0
+
+                    val candidate = PinRackCandidate(
+                        centerX = finalCenter,
+                        topY = (y - 16).toDouble().coerceAtLeast(0.0),
+                        bottomY = (y + 16).toDouble().coerceAtMost(h - 1.0),
+                        widthPx = finalWidth,
+                        pinPeakCount = c.size,
+                        contrastRatio = 2.0,
+                        confidence = (0.70 + (c.size / 7.0) * 0.25).coerceAtMost(0.98)
+                    )
+                    opticalCandidates.add(candidate)
+                }
+            }
+        }
+
+        // Deduplicate and cluster optical candidates sharing similar horizontal centers
+        val clusterBins = mutableListOf<MutableList<PinRackCandidate>>()
+        for (cand in opticalCandidates) {
+            val matchingBin = clusterBins.find { bin ->
+                val avgX = bin.map { it.centerX }.average()
+                abs(cand.centerX - avgX) < cand.widthPx * 0.50
+            }
+            if (matchingBin != null) {
+                matchingBin.add(cand)
+            } else {
+                clusterBins.add(mutableListOf(cand))
+            }
+        }
+
+        for (bin in clusterBins) {
+            val best = bin.maxByOrNull { it.confidence } ?: continue
+            val alreadyPresent = results.any { abs(it.centerX - best.centerX) < best.widthPx * 0.60 }
+            if (!alreadyPresent) {
+                results.add(best)
+            }
+        }
+
+        return results.sortedBy { it.centerX }
+    }
+
+    /**
+     * Calculates the optimal safe hardware zoom ratio for a user-selected pin rack,
+     * ensuring pins remain the focal point with >= 10% headroom while keeping the full 60-ft lane in frame.
+     */
+    fun computeSafeZoomForRack(
+        rack: PinRackCandidate,
+        width: Int,
+        height: Int,
+        foulLineYEstimate: Double? = null
+    ): Float {
+        val w = width.toDouble()
+        val h = height.toDouble()
+        val pinTopY = rack.topY
+
+        // Maximum safe zoom preserving pin deck headroom (at least 10% top margin)
+        val zPinsMax = if (pinTopY < 0.50 * h) {
+            ((0.40 * h) / (0.50 * h - pinTopY)).coerceAtLeast(1.0)
+        } else 3.5
+
+        val foulY = foulLineYEstimate ?: (h * 0.72)
+        val zFoulMax = if (foulY > 0.50 * h) {
+            ((0.40 * h) / (foulY - 0.50 * h)).coerceAtLeast(1.0)
+        } else 3.5
+
+        val laneW = rack.widthPx * 3.5
+        val targetZoomX = (0.78 * w) / laneW.coerceAtLeast(w * 0.20)
+        val targetZoomY = (0.72 * h) / (foulY - pinTopY).coerceAtLeast(h * 0.25)
+        val desiredZoom = min(targetZoomX, targetZoomY)
+
+        return min(min(zPinsMax, zFoulMax), desiredZoom).toFloat().coerceIn(1.0f, 3.0f)
+    }
+
+    /**
+     * Snaps user-tapped arrows point to the lane centerline vector connecting the selected pin deck to arrows.
+     */
+    fun snapArrowsToCenterline(
+        tappedPoint: Point2D,
+        pinRack: PinRackCandidate,
+        width: Int,
+        height: Int
+    ): Point2D {
+        // Compute centerline vector from pin rack base down to tapped Y level
+        val rackBaseY = pinRack.bottomY
+        val rackCenterX = pinRack.centerX
+        val tapY = tappedPoint.y.coerceIn(rackBaseY + 40.0, height * 0.85)
+
+        // Refine X using tapped point offset relative to rack center
+        val dx = tappedPoint.x - rackCenterX
+        val snappedX = rackCenterX + dx.coerceIn(-width * 0.25, width * 0.25)
+        return Point2D(snappedX, tapY)
+    }
+
+    /**
+     * Projects the left and right foul line gutter corners given the selected pin rack and arrows point.
+     */
+    fun projectFoulCorners(
+        pinRack: PinRackCandidate,
+        arrowsPoint: Point2D,
+        width: Int,
+        height: Int,
+        handedness: com.example.cebowlinglabtrack.domain.model.Handedness = com.example.cebowlinglabtrack.domain.model.Handedness.RIGHT
+    ): Pair<Point2D, Point2D> {
+        val w = width.toDouble()
+        val h = height.toDouble()
+
+        val rackBaseY = pinRack.bottomY
+        val rackCenterX = pinRack.centerX
+        val rackHalfW = pinRack.widthPx / 2.0
+
+        val arrowY = arrowsPoint.y
+        val arrowCenterX = arrowsPoint.x
+
+        // Estimate foul line Y (typically around 68% - 75% of screen height)
+        val foulY = (arrowY + (arrowY - rackBaseY) * 0.35).coerceIn(h * 0.60, h * 0.82)
+
+        // Linear perspective divergence factor from pin deck to foul line
+        val t = (foulY - rackBaseY) / (arrowY - rackBaseY).coerceAtLeast(1.0)
+        val foulHalfW = (rackHalfW * 3.6).coerceIn(w * 0.15, w * 0.45)
+
+        val foulCenterX = rackCenterX + (arrowCenterX - rackCenterX) * t
+
+        val foulLeftX = (foulCenterX - foulHalfW).coerceIn(0.0, w * 0.60)
+        val foulRightX = (foulCenterX + foulHalfW).coerceIn(w * 0.40, w - 1.0)
+
+        return Pair(
+            Point2D(foulLeftX, foulY),
+            Point2D(foulRightX, foulY)
+        )
+    }
+
+    /**
      * Direct gutter line detection scanning middle/lower lane surface.
      * Operates as a fallback when pin rack lights are dim, colored, or obstructed.
      */

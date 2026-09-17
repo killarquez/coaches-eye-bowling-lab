@@ -116,6 +116,7 @@ fun LiveTrackingScreen(
     onStopVideoFeed: (() -> Unit)? = null,
     onSaveShot: (() -> Unit)? = null,
     onViewportSizeChanged: ((Float, Float) -> Unit)? = null,
+    onRebaselineStability: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val videoPickerLauncher = rememberLauncherForActivityResult(
@@ -623,6 +624,26 @@ fun LiveTrackingScreen(
                             }
                         }
 
+                        // Camera Stability Badge
+                        if (state.isLaneCalibrated) {
+                            val badgeBg = if (state.isCameraDrifted) PowerCoral.copy(alpha = 0.85f) else NeonStrikeGreen.copy(alpha = 0.15f)
+                            val textCol = if (state.isCameraDrifted) Color.White else NeonStrikeGreen
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(badgeBg)
+                                    .border(1.dp, if (state.isCameraDrifted) PowerCoral else NeonStrikeGreen.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 7.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = if (state.isCameraDrifted) "⚠️ SHIFT ${state.cameraStabilityScore}%" else "● LOCKED ${state.cameraStabilityScore}%",
+                                    color = textCol,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         if (activeShot != null) {
                             Box(
                                 modifier = Modifier
@@ -669,6 +690,54 @@ fun LiveTrackingScreen(
                                 contentDescription = "Calibration",
                                 tint = NeonCyan
                             )
+                        }
+                    }
+                }
+
+                // Camera Drift Alert Banner (if tripod shifted < 80% match)
+                if (state.isCameraDrifted) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF2A0D0D).copy(alpha = 0.95f))
+                            .border(1.dp, PowerCoral, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "CAMERA SHIFT DETECTED (${state.cameraStabilityScore}% MATCH)",
+                                color = PowerCoral,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Text(
+                                text = "Tripod moved or vibrated during shot",
+                                color = Color.LightGray,
+                                fontSize = 9.sp
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(
+                                onClick = onNavigateCalibration,
+                                modifier = Modifier.height(28.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PowerCoral),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("RE-CALIBRATE", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = { onRebaselineStability?.invoke() },
+                                modifier = Modifier.height(28.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("KEEP", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

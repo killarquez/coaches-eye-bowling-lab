@@ -588,6 +588,91 @@ class TFLiteBallDetector(
     }
 
     /**
+     * Detects all occurrences of a specific landmark class across the field of view.
+     * Groups adjacent anchors to prevent duplicate detections of the same physical object.
+     */
+    fun detectAllLandmarks(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width,
+        classId: Int = 1,
+        minScore: Float = confidenceThreshold
+    ): List<LandmarkDetection> {
+        if (!isYolo || classId >= yoloClassCount) return emptyList()
+
+        prepareInputFromByteArray(imageBytes, width, height, stride)
+        inputTensorBuffer.rewind()
+        runner.run(inputTensorBuffer, outputsMap)
+
+        val anchors = yoloAnchorCount
+        val cxRow = yoloOutput[0][0]
+        val cyRow = yoloOutput[0][1]
+        val wRow = yoloOutput[0][2]
+        val hRow = yoloOutput[0][3]
+        val confRow = yoloOutput[0][4 + classId]
+
+        val rawCandidates = mutableListOf<LandmarkDetection>()
+        val className = DEFAULT_CLASS_LABELS.getOrElse(classId) { "class_$classId" }
+
+        for (i in 0 until anchors) {
+            val score = confRow[i]
+            if (score >= minScore) {
+                val normCx = cxRow[i] / inputSize.toDouble()
+                val normCy = cyRow[i] / inputSize.toDouble()
+                val normW = wRow[i] / inputSize.toDouble()
+                val normH = hRow[i] / inputSize.toDouble()
+
+                val xmin = (normCx - normW / 2.0).coerceIn(0.0, 1.0)
+                val ymin = (normCy - normH / 2.0).coerceIn(0.0, 1.0)
+                val xmax = (normCx + normW / 2.0).coerceIn(xmin, 1.0)
+                val ymax = (normCy + normH / 2.0).coerceIn(ymin, 1.0)
+
+                val u = normCx * width
+                val v = normCy * height
+
+                rawCandidates.add(
+                    LandmarkDetection(
+                        classId = classId,
+                        className = className,
+                        centroid = Point2D(u, v),
+                        boundingBox = floatArrayOf(ymin.toFloat(), xmin.toFloat(), ymax.toFloat(), xmax.toFloat()),
+                        confidence = score
+                    )
+                )
+            }
+        }
+
+        // Non-maximum clustering across horizontal centers
+        val distinctDetections = mutableListOf<LandmarkDetection>()
+        val sorted = rawCandidates.sortedByDescending { it.confidence }
+
+        for (cand in sorted) {
+            val candBox = cand.boundingBox
+            val candW = (candBox[3] - candBox[1]) * width
+            val isDuplicate = distinctDetections.any { existing ->
+                val dist = kotlin.math.abs(existing.centroid.x - cand.centroid.x)
+                dist < (candW * 0.70).coerceAtLeast(40.0)
+            }
+            if (!isDuplicate) {
+                distinctDetections.add(cand)
+            }
+        }
+
+        return distinctDetections.sortedBy { it.centroid.x }
+    }
+
+    /**
+     * Dedicated convenience detector for all visible 10-Pin Racks (Class 1) across all lanes.
+     */
+    fun detectAllPinRacks(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): List<LandmarkDetection> = detectAllLandmarks(imageBytes, width, height, stride, classId = 1)
+
+    /**
      * Dedicated convenience detector for the 10-Pin Rack (Class 1) with optional corridor restriction.
      */
     fun detectPinRack(

@@ -318,6 +318,48 @@ class AutoLaneDetectorTest {
         return imageBytes
     }
 
+    @Test
+    fun testFindAllPinRacksAndSafeZoom() {
+        val recognizer = com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer()
+        val width = 1000
+        val height = 1500
+        val stride = width
+
+        // Create frame with 2 adjacent lanes: Lane 25 at X=300, Lane 26 at X=700
+        val image = ByteArray(width * height) { 35.toByte() }
+        val pinDeckY = 350
+
+        fun stampPinRack(cx: Int) {
+            val halfW = 40
+            for (y in (pinDeckY - 14)..(pinDeckY - 2)) {
+                for (x in (cx - halfW)..(cx + halfW)) {
+                    val relX = x - (cx - halfW)
+                    val isPeak = (relX in 8..13 || relX in 22..27 || relX in 36..41 || relX in 50..55 || relX in 64..69)
+                    if (isPeak) image[y * stride + x] = 245.toByte()
+                }
+            }
+        }
+        stampPinRack(300)
+        stampPinRack(700)
+
+        val racks = recognizer.findAllPinRacks(image, width, height, stride)
+        assertTrue("Should detect multiple pin racks across the frame", racks.isNotEmpty())
+
+        val rightRack = racks.find { it.centerX > 500 } ?: racks.first()
+        val safeZoom = recognizer.computeSafeZoomForRack(rightRack, width, height)
+        assertTrue("Safe zoom should be within 1.0f to 3.0f", safeZoom in 1.0f..3.0f)
+
+        // Test snapArrowsToCenterline
+        val tappedPoint = com.example.cebowlinglabtrack.domain.model.Point2D(690.0, 700.0)
+        val snappedArrows = recognizer.snapArrowsToCenterline(tappedPoint, rightRack, width, height)
+        assertTrue("Snapped arrows should align with rack centerline", kotlin.math.abs(snappedArrows.x - rightRack.centerX) < 100.0)
+
+        // Test projectFoulCorners
+        val (foulL, foulR) = recognizer.projectFoulCorners(rightRack, snappedArrows, width, height)
+        assertTrue("Foul left should be to the left of foul right", foulL.x < foulR.x)
+        assertTrue("Foul line Y should be below arrows", foulL.y > snappedArrows.y)
+    }
+
     private fun assertEquals(expected: Any?, actual: Any?) {
         org.junit.Assert.assertEquals(expected, actual)
     }

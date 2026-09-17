@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import com.example.cebowlinglabtrack.domain.calibration.AutonomousLaneRecognizer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -97,6 +99,18 @@ import kotlin.math.sqrt
  *
  * Real physical pins sit naturally inside the 60 ft pin deck boundary and bracket.
  */
+enum class CalibrationMode {
+    GUIDED_WIZARD,
+    FREEFORM_MANUAL
+}
+
+enum class GuidedStep(val stepNumber: Int, val title: String) {
+    STEP1_TRIPOD(1, "TRIPOD"),
+    STEP2_PIN_DECK(2, "PIN DECK"),
+    STEP3_ARROWS(3, "ARROWS"),
+    STEP4_FOUL_LINE(4, "FOUL LINE")
+}
+
 @Composable
 fun CalibrationScreen(
     currentCalibration: LaneCalibration?,
@@ -137,6 +151,12 @@ fun CalibrationScreen(
     var nudgeStepPx by remember { mutableStateOf(2f) }
     var autoDetectionStatus by remember { mutableStateOf<String?>(null) }
 
+    val laneRecognizer = remember { AutonomousLaneRecognizer(calibrator) }
+    var calibrationMode by remember { mutableStateOf(CalibrationMode.GUIDED_WIZARD) }
+    var guidedStep by remember { mutableStateOf(GuidedStep.STEP1_TRIPOD) }
+    var detectedPinRacks by remember { mutableStateOf<List<AutonomousLaneRecognizer.PinRackCandidate>>(emptyList()) }
+    var selectedPinRack by remember { mutableStateOf<AutonomousLaneRecognizer.PinRackCandidate?>(null) }
+
     // Camera frame buffers for 1-click Auto-Detect
     var latestFrameBytes by remember { mutableStateOf<ByteArray?>(null) }
     var frameWidth by remember { mutableStateOf(0) }
@@ -144,6 +164,17 @@ fun CalibrationScreen(
     var frameStride by remember { mutableStateOf(0) }
     var lastViewportWidth by remember { mutableStateOf(1080f) }
     var lastViewportHeight by remember { mutableStateOf(2340f) }
+
+    LaunchedEffect(latestFrameBytes, guidedStep, calibrationMode) {
+        val bytes = latestFrameBytes ?: return@LaunchedEffect
+        if (calibrationMode == CalibrationMode.GUIDED_WIZARD && guidedStep == GuidedStep.STEP2_PIN_DECK && frameWidth > 0 && frameHeight > 0) {
+            val s = if (frameStride > 0) frameStride else frameWidth
+            val racks = laneRecognizer.findAllPinRacks(bytes, frameWidth, frameHeight, s, zoomRatio)
+            if (racks.isNotEmpty()) {
+                detectedPinRacks = racks
+            }
+        }
+    }
 
     // Full-Screen Root Container
     BoxWithConstraints(
@@ -206,32 +237,97 @@ fun CalibrationScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            val touchX = offset.x
-                            val touchY = offset.y
-                            val distances = listOf(
-                                dist(touchX, touchY, flX, flY),
-                                dist(touchX, touchY, frX, frY),
-                                dist(touchX, touchY, alX, alY),
-                                dist(touchX, touchY, arX, arY)
-                            )
-                            val minIdx = distances.indices.minByOrNull { distances[it] } ?: 0
-                            selectedPinIndex = if (distances[minIdx] < 140f) minIdx else null
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            when (selectedPinIndex) {
-                                0 -> { flX += dragAmount.x; flY += dragAmount.y }
-                                1 -> { frX += dragAmount.x; frY += dragAmount.y }
-                                2 -> { alX += dragAmount.x; alY += dragAmount.y }
-                                3 -> { arX += dragAmount.x; arY += dragAmount.y }
+                .pointerInput(calibrationMode, guidedStep, detectedPinRacks) {
+                    if (calibrationMode == CalibrationMode.GUIDED_WIZARD && guidedStep != GuidedStep.STEP4_FOUL_LINE) {
+                        detectTapGestures { offset ->
+                            val touchX = offset.x.toDouble()
+                            val touchY = offset.y.toDouble()
+                            val fw = if (frameWidth > 0) frameWidth else lastViewportWidth.toInt()
+                            val fh = if (frameHeight > 0) frameHeight else lastViewportHeight.toInt()
+
+                            when (guidedStep) {
+                                GuidedStep.STEP1_TRIPOD -> {
+                                    guidedStep = GuidedStep.STEP2_PIN_DECK
+                                }
+                                GuidedStep.STEP2_PIN_DECK -> {
+                                    val candidate = detectedPinRacks.minByOrNull {
+                                        dist(touchX.toFloat(), touchY.toFloat(), it.centerX.toFloat(), it.bottomY.toFloat())
+                                    } ?: AutonomousLaneRecognizer.PinRackCandidate(
+                                        centerX = touchX,
+                                        topY = (touchY - 28.0).coerceAtLeast(0.0),
+                                        bottomY = touchY,
+                                        widthPx = (lastViewportWidth * 0.14).coerceIn(80.0, 300.0),
+                                        pinPeakCount = 7,
+                                        contrastRatio = 2.0,
+                                        confidence = 0.90
+                                    )
+
+                                    selectedPinRack = candidate
+                                    val safeZoom = laneRecognizer.computeSafeZoomForRack(candidate, fw, fh)
+                                    if (kotlin.math.abs(safeZoom - zoomRatio) > 0.05f) {
+                                        onZoomChange(safeZoom)
+                                    }
+
+                                    val halfW = candidate.widthPx / 2.0
+                                    alX = (candidate.centerX - halfW).toFloat()
+                                    arX = (candidate.centerX + halfW).toFloat()
+                                    alY = candidate.bottomY.toFloat()
+                                    arY = candidate.bottomY.toFloat()
+
+                                    autoDetectionStatus = "✓ PIN DECK LOCKED (ZOOM ${String.format("%.2f", safeZoom)}x)"
+                                    guidedStep = GuidedStep.STEP3_ARROWS
+                                }
+                                GuidedStep.STEP3_ARROWS -> {
+                                    val rack = selectedPinRack ?: AutonomousLaneRecognizer.PinRackCandidate(
+                                        centerX = (alX + arX) / 2.0,
+                                        topY = alY.toDouble() - 30.0,
+                                        bottomY = alY.toDouble(),
+                                        widthPx = (arX - alX).toDouble(),
+                                        pinPeakCount = 7,
+                                        contrastRatio = 2.0,
+                                        confidence = 0.90
+                                    )
+                                    val snapped = laneRecognizer.snapArrowsToCenterline(Point2D(touchX, touchY), rack, fw, fh)
+                                    val (foulL, foulR) = laneRecognizer.projectFoulCorners(rack, snapped, fw, fh, alignmentHandedness)
+
+                                    flX = foulL.x.toFloat()
+                                    flY = foulL.y.toFloat()
+                                    frX = foulR.x.toFloat()
+                                    frY = foulR.y.toFloat()
+
+                                    autoDetectionStatus = "✓ ARROWS & FOUL LINE SNAPPED"
+                                    guidedStep = GuidedStep.STEP4_FOUL_LINE
+                                }
+                                GuidedStep.STEP4_FOUL_LINE -> {}
                             }
-                        },
-                        onDragEnd = {},
-                        onDragCancel = {}
-                    )
+                        }
+                    } else {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val touchX = offset.x
+                                val touchY = offset.y
+                                val distances = listOf(
+                                    dist(touchX, touchY, flX, flY),
+                                    dist(touchX, touchY, frX, frY),
+                                    dist(touchX, touchY, alX, alY),
+                                    dist(touchX, touchY, arX, arY)
+                                )
+                                val minIdx = distances.indices.minByOrNull { distances[it] } ?: 0
+                                selectedPinIndex = if (distances[minIdx] < 140f) minIdx else null
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                when (selectedPinIndex) {
+                                    0 -> { flX += dragAmount.x; flY += dragAmount.y }
+                                    1 -> { frX += dragAmount.x; frY += dragAmount.y }
+                                    2 -> { alX += dragAmount.x; alY += dragAmount.y }
+                                    3 -> { arX += dragAmount.x; arY += dragAmount.y }
+                                }
+                            },
+                            onDragEnd = {},
+                            onDragCancel = {}
+                        )
+                    }
                 }
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -388,7 +484,72 @@ fun CalibrationScreen(
                     }
                 }
 
-                // 7. Draw 4 Interactive Corner Handles with Labels
+                // 6. Guided Wizard Canvas Overlays
+                if (calibrationMode == CalibrationMode.GUIDED_WIZARD) {
+                    if (guidedStep == GuidedStep.STEP2_PIN_DECK) {
+                        // Render glowing selectable target brackets over all candidate 7-pin clusters
+                        for ((idx, rack) in detectedPinRacks.withIndex()) {
+                            val rx = rack.centerX.toFloat()
+                            val ry = rack.bottomY.toFloat()
+                            val rw = rack.widthPx.toFloat()
+                            val rh = (rack.bottomY - rack.topY).toFloat().coerceAtLeast(30f)
+                            val isSelected = selectedPinRack?.let { kotlin.math.abs(it.centerX - rack.centerX) < 20.0 } ?: false
+                            val chipColor = if (isSelected) NeonStrikeGreen else NeonCyan
+
+                            val left = rx - rw / 2f
+                            val right = rx + rw / 2f
+                            val top = ry - rh
+                            val bottom = ry
+                            val bLen = 14f
+
+                            drawLine(chipColor, Offset(left, top), Offset(left + bLen, top), 3f)
+                            drawLine(chipColor, Offset(left, top), Offset(left, top + bLen), 3f)
+                            drawLine(chipColor, Offset(right, top), Offset(right - bLen, top), 3f)
+                            drawLine(chipColor, Offset(right, top), Offset(right, top + bLen), 3f)
+                            drawLine(chipColor, Offset(left, bottom), Offset(left + bLen, bottom), 3f)
+                            drawLine(chipColor, Offset(left, bottom), Offset(left, bottom - bLen), 3f)
+                            drawLine(chipColor, Offset(right, bottom), Offset(right - bLen, bottom), 3f)
+                            drawLine(chipColor, Offset(right, bottom), Offset(right, bottom - bLen), 3f)
+
+                            drawContext.canvas.nativeCanvas.drawText(
+                                "TAP LANE ${idx + 1}",
+                                rx,
+                                top - 12f,
+                                android.graphics.Paint().apply {
+                                    color = android.graphics.Color.WHITE
+                                    textSize = 28f
+                                    textAlign = android.graphics.Paint.Align.CENTER
+                                    isFakeBoldText = true
+                                    setShadowLayer(6f, 0f, 0f, android.graphics.Color.BLACK)
+                                }
+                            )
+                        }
+                    } else if (guidedStep == GuidedStep.STEP3_ARROWS) {
+                        val rackX = (alX + arX) / 2f
+                        val rackY = alY
+                        // Draw centerline vector towards arrows
+                        drawLine(
+                            color = ElectricAmber.copy(alpha = 0.8f),
+                            start = Offset(rackX, rackY),
+                            end = Offset(rackX, viewHeight * 0.70f),
+                            strokeWidth = 2.5f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 10f), 0f)
+                        )
+                        // Pulsing target circle at 15ft
+                        drawCircle(
+                            color = ElectricAmber.copy(alpha = 0.35f),
+                            radius = 45f,
+                            center = Offset(rackX, viewHeight * 0.52f)
+                        )
+                        drawCircle(
+                            color = ElectricAmber,
+                            radius = 6f,
+                            center = Offset(rackX, viewHeight * 0.52f)
+                        )
+                    }
+                }
+
+                // 7. Draw Interactive Corner Handles with Labels
                 val topLabelL = when (anchorMode) {
                     CalibrationAnchorMode.PIN_DECK -> "DECK-L (60FT)"
                     CalibrationAnchorMode.GUTTERS_AT_ARROWS -> "GUTTER-L (15FT)"
@@ -400,10 +561,14 @@ fun CalibrationScreen(
                     CalibrationAnchorMode.ARROW_MARKERS -> "ARROW-R (B35)"
                 }
 
-                drawPinHandle("FL-L (B39)", Offset(flX, flY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 0)
-                drawPinHandle("FL-R (B1)", Offset(frX, frY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 1)
-                drawPinHandle(topLabelL, Offset(alX, alY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else ElectricAmber, selectedPinIndex == 2)
-                drawPinHandle(topLabelR, Offset(arX, arY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else ElectricAmber, selectedPinIndex == 3)
+                if (calibrationMode == CalibrationMode.FREEFORM_MANUAL || guidedStep == GuidedStep.STEP4_FOUL_LINE) {
+                    drawPinHandle("FL-L (B39)", Offset(flX, flY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 0)
+                    drawPinHandle("FL-R (B1)", Offset(frX, frY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 1)
+                }
+                if (calibrationMode == CalibrationMode.FREEFORM_MANUAL) {
+                    drawPinHandle(topLabelL, Offset(alX, alY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else ElectricAmber, selectedPinIndex == 2)
+                    drawPinHandle(topLabelR, Offset(arX, arY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else ElectricAmber, selectedPinIndex == 3)
+                }
             }
         }
 
@@ -441,31 +606,143 @@ fun CalibrationScreen(
                     Spacer(modifier = Modifier.width(6.dp))
                     Column {
                         Text(
-                            text = "FULL LANE CALIBRATION",
+                            text = if (calibrationMode == CalibrationMode.GUIDED_WIZARD) "GUIDED SETUP WIZARD" else "MANUAL CALIBRATION",
                             color = TextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
                         Text(
-                            text = "DRAG 4 CORNERS: FOUL LINE TO PIN DECK (0-60 FT)",
-                            color = TextSecondary,
+                            text = if (calibrationMode == CalibrationMode.GUIDED_WIZARD) "STEP ${guidedStep.stepNumber} OF 4: ${guidedStep.title}" else "DRAG 4 CORNERS: FOUL LINE TO PIN DECK (0-60 FT)",
+                            color = if (calibrationMode == CalibrationMode.GUIDED_WIZARD) NeonCyan else TextSecondary,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = {
+                            calibrationMode = if (calibrationMode == CalibrationMode.GUIDED_WIZARD) {
+                                CalibrationMode.FREEFORM_MANUAL
+                            } else {
+                                guidedStep = GuidedStep.STEP1_TRIPOD
+                                CalibrationMode.GUIDED_WIZARD
+                            }
+                        },
+                        modifier = Modifier.height(28.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (calibrationMode == CalibrationMode.GUIDED_WIZARD) NeonStrikeGreen.copy(alpha = 0.2f) else UsbcGold.copy(alpha = 0.2f)
+                        ),
+                        shape = RoundedCornerShape(6.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (calibrationMode == CalibrationMode.GUIDED_WIZARD) NeonStrikeGreen else UsbcGold),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (calibrationMode == CalibrationMode.GUIDED_WIZARD) "MANUAL NUDGE" else "GUIDED WIZARD",
+                            color = if (calibrationMode == CalibrationMode.GUIDED_WIZARD) NeonStrikeGreen else UsbcGold,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(UsbcNavyLight)
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "${String.format("%.1f", zoomRatio)}x",
+                            color = NeonCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            if (calibrationMode == CalibrationMode.GUIDED_WIZARD) {
+                // Step Progress Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(DarkSurface.copy(alpha = 0.95f))
+                        .border(1.dp, DarkCardBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GuidedStep.values().forEach { step ->
+                        val isCurrent = guidedStep == step
+                        val isPassed = guidedStep.stepNumber > step.stepNumber
+                        val stepBg = when {
+                            isCurrent -> NeonCyan.copy(alpha = 0.25f)
+                            isPassed -> NeonStrikeGreen.copy(alpha = 0.25f)
+                            else -> Color.Transparent
+                        }
+                        val stepBorder = when {
+                            isCurrent -> NeonCyan
+                            isPassed -> NeonStrikeGreen
+                            else -> Color.DarkGray
+                        }
+                        val stepTextCol = when {
+                            isCurrent -> NeonCyan
+                            isPassed -> NeonStrikeGreen
+                            else -> TextMuted
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(stepBg)
+                                .border(1.dp, stepBorder, RoundedCornerShape(6.dp))
+                                .clickable { guidedStep = step }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "${step.stepNumber}. ${step.title}",
+                                color = stepTextCol,
+                                fontSize = 9.sp,
+                                fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                // Instructions Card
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(UsbcNavyLight)
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF0F172A).copy(alpha = 0.95f))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
-                    Text(
-                        text = "DLT 3x3 • ${String.format("%.1f", zoomRatio)}x",
-                        color = NeonCyan,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column {
+                        Text(
+                            text = when (guidedStep) {
+                                GuidedStep.STEP1_TRIPOD -> "STEP 1: ALIGN TRIPOD BEHIND ${if (alignmentHandedness == Handedness.RIGHT) "RIGHT" else "LEFT"} GUTTER"
+                                GuidedStep.STEP2_PIN_DECK -> "STEP 2: TAP YOUR LANE'S PIN DECK"
+                                GuidedStep.STEP3_ARROWS -> "STEP 3: TAP 15-FT ARROWS ON YOUR LANE"
+                                GuidedStep.STEP4_FOUL_LINE -> "STEP 4: CONFIRM FOUL LINE CORNERS"
+                            },
+                            color = NeonCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = when (guidedStep) {
+                                GuidedStep.STEP1_TRIPOD -> currentGuidance ?: "Place tripod 5-8 ft behind approach. Level roll and pitch phone -8° down toward pins."
+                                GuidedStep.STEP2_PIN_DECK -> "Tap on your lane's pins to lock the deck. Camera will automatically apply safe zoom."
+                                GuidedStep.STEP3_ARROWS -> "Tap near the center arrow (Board 20). Centerline vector will snap to wood markings."
+                                GuidedStep.STEP4_FOUL_LINE -> "Verify that the handles touch the wood edges at the foul line, then tap Lock Lane."
+                            },
+                            color = TextPrimary,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Normal
+                        )
+                    }
                 }
             }
 
@@ -718,150 +995,313 @@ fun CalibrationScreen(
             }
 
             // Primary Action Buttons Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Auto-Detect CV
-                Button(
-                    onClick = {
-                        val frame = latestFrameBytes
-                        if (frame != null) {
-                            if (onAutoDetectLaneDetailed != null) {
-                                val res = onAutoDetectLaneDetailed(frame, frameWidth, frameHeight, frameStride, alignmentHandedness, anchorMode)
-                                autoDetectionStatus = res.statusMessage
-                                currentGuidance = res.autoCenterGuidance
-                                if (res.isSuccess) {
-                                    flX = res.foulLineLeft.x.toFloat()
-                                    flY = res.foulLineLeft.y.toFloat()
-                                    frX = res.foulLineRight.x.toFloat()
-                                    frY = res.foulLineRight.y.toFloat()
-                                    val topL = if (anchorMode == CalibrationAnchorMode.PIN_DECK) (res.pinDeckLeft ?: res.arrowsLeft) else res.arrowsLeft
-                                    val topR = if (anchorMode == CalibrationAnchorMode.PIN_DECK) (res.pinDeckRight ?: res.arrowsRight) else res.arrowsRight
-                                    alX = topL.x.toFloat()
-                                    alY = topL.y.toFloat()
-                                    arX = topR.x.toFloat()
-                                    arY = topR.y.toFloat()
-                                    if (abs(res.optimalZoomRatio - zoomRatio) > 0.15f) {
-                                        onZoomChange(res.optimalZoomRatio)
-                                    }
+            if (calibrationMode == CalibrationMode.GUIDED_WIZARD) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (guidedStep != GuidedStep.STEP1_TRIPOD) {
+                        Button(
+                            onClick = {
+                                guidedStep = when (guidedStep) {
+                                    GuidedStep.STEP2_PIN_DECK -> GuidedStep.STEP1_TRIPOD
+                                    GuidedStep.STEP3_ARROWS -> GuidedStep.STEP2_PIN_DECK
+                                    GuidedStep.STEP4_FOUL_LINE -> GuidedStep.STEP3_ARROWS
+                                    else -> GuidedStep.STEP1_TRIPOD
                                 }
-                            } else if (onAutoDetectLane != null) {
-                                val success = onAutoDetectLane(frame, frameWidth, frameHeight, frameStride, alignmentHandedness)
-                                if (success) {
-                                    currentCalibration?.let {
-                                        flX = it.foulLineLeftScreen.x.toFloat()
-                                        flY = it.foulLineLeftScreen.y.toFloat()
-                                        frX = it.foulLineRightScreen.x.toFloat()
-                                        frY = it.foulLineRightScreen.y.toFloat()
-                                        alX = it.arrowsLeftScreen.x.toFloat()
-                                        alY = it.arrowsLeftScreen.y.toFloat()
-                                        arX = it.arrowsRightScreen.x.toFloat()
-                                        arY = it.arrowsRightScreen.y.toFloat()
-                                    }
-                                    autoDetectionStatus = "✓ LANE AUTO-DETECTED & SNAPPED"
-                                } else {
-                                    autoDetectionStatus = "❌ NO PIN RACK DETECTED - AIM AT PINS"
-                                }
-                            }
-                        } else {
-                            autoDetectionStatus = "POINT CAMERA AT LANE TO AUTO-DETECT"
+                            },
+                            modifier = Modifier
+                                .weight(0.7f)
+                                .height(44.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = TextPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "BACK",
+                                color = TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                    },
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .height(42.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Auto Detect",
-                        tint = Color.Black,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "AUTO-DETECT",
-                        color = Color.Black,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
+                    }
 
-                // USBC Reset Preset
-                Button(
-                    onClick = {
-                        val defaultPair = calibrator.createDefaultCalibration(
-                            viewWidth = lastViewportWidth,
-                            viewHeight = lastViewportHeight,
-                            zoomRatio = zoomRatio,
-                            anchorMode = anchorMode,
-                            alignment = alignmentHandedness
-                        )
-                        val defaultCal = defaultPair.first
-                        flX = defaultCal.foulLineLeftScreen.x.toFloat()
-                        flY = defaultCal.foulLineLeftScreen.y.toFloat()
-                        frX = defaultCal.foulLineRightScreen.x.toFloat()
-                        frY = defaultCal.foulLineRightScreen.y.toFloat()
-                        alX = defaultCal.arrowsLeftScreen.x.toFloat()
-                        alY = defaultCal.arrowsLeftScreen.y.toFloat()
-                        arX = defaultCal.arrowsRightScreen.x.toFloat()
-                        arY = defaultCal.arrowsRightScreen.y.toFloat()
-                        onCalibrateDefault?.invoke(alignmentHandedness)
-                        autoDetectionStatus = "✓ FULL LANE PRESET (${String.format("%.1f", zoomRatio)}x)"
-                    },
-                    modifier = Modifier
-                        .weight(0.9f)
-                        .height(42.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = UsbcGold),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.RestartAlt,
-                        contentDescription = "Preset",
-                        tint = Color.Black,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "RESET",
-                        color = Color.Black,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    when (guidedStep) {
+                        GuidedStep.STEP1_TRIPOD -> {
+                            Button(
+                                onClick = { guidedStep = GuidedStep.STEP2_PIN_DECK },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "NEXT: SELECT PIN DECK →",
+                                    color = Color.Black,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                        GuidedStep.STEP2_PIN_DECK -> {
+                            Button(
+                                onClick = {
+                                    if (selectedPinRack != null) {
+                                        guidedStep = GuidedStep.STEP3_ARROWS
+                                    } else if (detectedPinRacks.isNotEmpty()) {
+                                        val rack = detectedPinRacks.first()
+                                        selectedPinRack = rack
+                                        val fw = if (frameWidth > 0) frameWidth else lastViewportWidth.toInt()
+                                        val fh = if (frameHeight > 0) frameHeight else lastViewportHeight.toInt()
+                                        val safeZoom = laneRecognizer.computeSafeZoomForRack(rack, fw, fh)
+                                        if (abs(safeZoom - zoomRatio) > 0.05f) {
+                                            onZoomChange(safeZoom)
+                                        }
+                                        val halfW = rack.widthPx / 2.0
+                                        alX = (rack.centerX - halfW).toFloat()
+                                        arX = (rack.centerX + halfW).toFloat()
+                                        alY = rack.bottomY.toFloat()
+                                        arY = rack.bottomY.toFloat()
+                                        autoDetectionStatus = "✓ PIN DECK LOCKED (${String.format("%.2f", safeZoom)}x)"
+                                        guidedStep = GuidedStep.STEP3_ARROWS
+                                    } else {
+                                        autoDetectionStatus = "TAP PIN DECK ON SCREEN"
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .height(44.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "Select Pins",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (selectedPinRack != null) "NEXT: TAP ARROWS →" else "TAP PIN DECK ON SCREEN",
+                                    color = Color.Black,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                        GuidedStep.STEP3_ARROWS -> {
+                            Button(
+                                onClick = {
+                                    guidedStep = GuidedStep.STEP4_FOUL_LINE
+                                },
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .height(44.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = UsbcGold),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowForward,
+                                    contentDescription = "Next",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "TAP 15-FT ARROWS ON SCREEN",
+                                    color = Color.Black,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                        GuidedStep.STEP4_FOUL_LINE -> {
+                            Button(
+                                onClick = {
+                                    onSaveCalibration(
+                                        Point2D(flX.toDouble(), flY.toDouble()),
+                                        Point2D(frX.toDouble(), frY.toDouble()),
+                                        Point2D(alX.toDouble(), alY.toDouble()),
+                                        Point2D(arX.toDouble(), arY.toDouble()),
+                                        anchorMode
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1.4f)
+                                    .height(44.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonStrikeGreen),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Lock and Start",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "LOCK LANE & START BOWLING ✓",
+                                    color = Color.Black,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                    }
                 }
-
-                // Save and Arm
-                Button(
-                    onClick = {
-                        onSaveCalibration(
-                            Point2D(flX.toDouble(), flY.toDouble()),
-                            Point2D(frX.toDouble(), frY.toDouble()),
-                            Point2D(alX.toDouble(), alY.toDouble()),
-                            Point2D(arX.toDouble(), arY.toDouble()),
-                            anchorMode
-                        )
-                    },
-                    modifier = Modifier
-                        .weight(1.3f)
-                        .height(42.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonStrikeGreen),
-                    shape = RoundedCornerShape(10.dp)
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Apply",
-                        tint = Color.Black,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "APPLY & ARM",
-                        color = Color.Black,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    // Auto-Detect CV
+                    Button(
+                        onClick = {
+                            val frame = latestFrameBytes
+                            if (frame != null) {
+                                if (onAutoDetectLaneDetailed != null) {
+                                    val res = onAutoDetectLaneDetailed(frame, frameWidth, frameHeight, frameStride, alignmentHandedness, anchorMode)
+                                    autoDetectionStatus = res.statusMessage
+                                    currentGuidance = res.autoCenterGuidance
+                                    if (res.isSuccess) {
+                                        flX = res.foulLineLeft.x.toFloat()
+                                        flY = res.foulLineLeft.y.toFloat()
+                                        frX = res.foulLineRight.x.toFloat()
+                                        frY = res.foulLineRight.y.toFloat()
+                                        val topL = if (anchorMode == CalibrationAnchorMode.PIN_DECK) (res.pinDeckLeft ?: res.arrowsLeft) else res.arrowsLeft
+                                        val topR = if (anchorMode == CalibrationAnchorMode.PIN_DECK) (res.pinDeckRight ?: res.arrowsRight) else res.arrowsRight
+                                        alX = topL.x.toFloat()
+                                        alY = topL.y.toFloat()
+                                        arX = topR.x.toFloat()
+                                        arY = topR.y.toFloat()
+                                        if (abs(res.optimalZoomRatio - zoomRatio) > 0.15f) {
+                                            onZoomChange(res.optimalZoomRatio)
+                                        }
+                                    }
+                                } else if (onAutoDetectLane != null) {
+                                    val success = onAutoDetectLane(frame, frameWidth, frameHeight, frameStride, alignmentHandedness)
+                                    if (success) {
+                                        currentCalibration?.let {
+                                            flX = it.foulLineLeftScreen.x.toFloat()
+                                            flY = it.foulLineLeftScreen.y.toFloat()
+                                            frX = it.foulLineRightScreen.x.toFloat()
+                                            frY = it.foulLineRightScreen.y.toFloat()
+                                            alX = it.arrowsLeftScreen.x.toFloat()
+                                            alY = it.arrowsLeftScreen.y.toFloat()
+                                            arX = it.arrowsRightScreen.x.toFloat()
+                                            arY = it.arrowsRightScreen.y.toFloat()
+                                        }
+                                        autoDetectionStatus = "✓ LANE AUTO-DETECTED & SNAPPED"
+                                    } else {
+                                        autoDetectionStatus = "❌ NO PIN RACK DETECTED - AIM AT PINS"
+                                    }
+                                }
+                            } else {
+                                autoDetectionStatus = "POINT CAMERA AT LANE TO AUTO-DETECT"
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1.1f)
+                            .height(42.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = "Auto Detect",
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "AUTO-DETECT",
+                            color = Color.Black,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    // USBC Reset Preset
+                    Button(
+                        onClick = {
+                            val defaultPair = calibrator.createDefaultCalibration(
+                                viewWidth = lastViewportWidth,
+                                viewHeight = lastViewportHeight,
+                                zoomRatio = zoomRatio,
+                                anchorMode = anchorMode,
+                                alignment = alignmentHandedness
+                            )
+                            val defaultCal = defaultPair.first
+                            flX = defaultCal.foulLineLeftScreen.x.toFloat()
+                            flY = defaultCal.foulLineLeftScreen.y.toFloat()
+                            frX = defaultCal.foulLineRightScreen.x.toFloat()
+                            frY = defaultCal.foulLineRightScreen.y.toFloat()
+                            alX = defaultCal.arrowsLeftScreen.x.toFloat()
+                            alY = defaultCal.arrowsLeftScreen.y.toFloat()
+                            arX = defaultCal.arrowsRightScreen.x.toFloat()
+                            arY = defaultCal.arrowsRightScreen.y.toFloat()
+                            onCalibrateDefault?.invoke(alignmentHandedness)
+                            autoDetectionStatus = "✓ FULL LANE PRESET (${String.format("%.1f", zoomRatio)}x)"
+                        },
+                        modifier = Modifier
+                            .weight(0.9f)
+                            .height(42.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = UsbcGold),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RestartAlt,
+                            contentDescription = "Preset",
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "RESET",
+                            color = Color.Black,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // Save and Arm
+                    Button(
+                        onClick = {
+                            onSaveCalibration(
+                                Point2D(flX.toDouble(), flY.toDouble()),
+                                Point2D(frX.toDouble(), frY.toDouble()),
+                                Point2D(alX.toDouble(), alY.toDouble()),
+                                Point2D(arX.toDouble(), arY.toDouble()),
+                                anchorMode
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(42.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonStrikeGreen),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Apply",
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "APPLY & ARM",
+                            color = Color.Black,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
                 }
             }
         }

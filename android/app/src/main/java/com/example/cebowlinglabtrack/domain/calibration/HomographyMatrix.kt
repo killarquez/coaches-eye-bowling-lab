@@ -130,6 +130,20 @@ class HomographyMatrix(
         return mZoom.multiply(this)
     }
 
+    /**
+     * Translates this homography by (dx, dy) screen pixel displacement,
+     * useful for real-time micro-drift compensation.
+     */
+    fun translate(dx: Double, dy: Double): HomographyMatrix {
+        if (abs(dx) < 1e-4 && abs(dy) < 1e-4) return this
+        val mTrans = HomographyMatrix(
+            1.0, 0.0, dx,
+            0.0, 1.0, dy,
+            0.0, 0.0, 1.0
+        )
+        return mTrans.multiply(this)
+    }
+
     companion object {
         fun identity(): HomographyMatrix = HomographyMatrix(
             doubleArrayOf(

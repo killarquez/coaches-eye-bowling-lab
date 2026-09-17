@@ -140,7 +140,8 @@ fun MainNavigation(
                         onSimulateShot = { preset -> viewModel.simulateShot(preset) },
                         onPlayVideoFeed = { uri -> viewModel.playVideoFeed(context, uri) },
                         onStopVideoFeed = { viewModel.stopVideoFeed() },
-                        onViewportSizeChanged = { w, h -> viewModel.updateViewportSize(w, h) }
+                        onViewportSizeChanged = { w, h -> viewModel.updateViewportSize(w, h) },
+                        onRebaselineStability = { viewModel.rebaselineCameraStability() }
                     )
                 }
                 BowlingScreenTab.LANE_2D -> {
