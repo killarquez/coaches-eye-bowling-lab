@@ -80,16 +80,16 @@ class TripodAngleAdvisor(context: Context) : SensorEventListener {
 
     private fun evaluateAngles(pitch: Float, roll: Float) {
         // In typical Android portrait mounting on tripod:
-        // Ideal pitch is -6.0° to -10.0° (pointing slightly down towards the 60 ft deck)
-        val isPitchOptimal = pitch in -11.0f..-5.0f
-        val isRollOptimal = abs(roll) <= 1.5f
+        // Down-lane pitch ranges comfortably between -18.0° and -2.0° depending on tripod height (3.5ft - 6ft)
+        val isPitchOptimal = pitch in -18.0f..-2.0f
+        val isRollOptimal = abs(roll) <= 4.0f
         val isLevel = isPitchOptimal && isRollOptimal
 
         val advice = when {
-            abs(roll) > 1.5f && roll > 0 -> "LEVEL TRIPOD: TILT LEFT ${String.format("%.1f", abs(roll))}°"
-            abs(roll) > 1.5f && roll < 0 -> "LEVEL TRIPOD: TILT RIGHT ${String.format("%.1f", abs(roll))}°"
-            pitch > -5.0f -> "TILT PHONE DOWN TOWARD PINS (${String.format("%.1f", pitch)}°)"
-            pitch < -11.0f -> "TILT PHONE UPWARD (${String.format("%.1f", pitch)}°)"
+            abs(roll) > 4.0f && roll > 0 -> "LEVEL TRIPOD: TILT LEFT ${String.format("%.1f", abs(roll))}°"
+            abs(roll) > 4.0f && roll < 0 -> "LEVEL TRIPOD: TILT RIGHT ${String.format("%.1f", abs(roll))}°"
+            pitch > -2.0f -> "TILT PHONE DOWN TOWARD PINS (${String.format("%.1f", pitch)}°)"
+            pitch < -18.0f -> "TILT PHONE UPWARD (${String.format("%.1f", pitch)}°)"
             else -> "TRIPOD ALIGNMENT OPTIMAL (120 FPS READY)"
         }
 
