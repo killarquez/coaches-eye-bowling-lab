@@ -139,9 +139,10 @@ object KinematicsCalculator {
         screenHeight: Float,
         handedness: Handedness = Handedness.RIGHT
     ): Double {
-        // Slide foot ankle or foot index
+        // Coaching convention: measure slide board at the big toe (FOOT_INDEX)
+        val toeIdx = if (handedness == Handedness.RIGHT) PoseLandmarkIndex.LEFT_FOOT_INDEX else PoseLandmarkIndex.RIGHT_FOOT_INDEX
         val ankleIdx = if (handedness == Handedness.RIGHT) PoseLandmarkIndex.LEFT_ANKLE else PoseLandmarkIndex.RIGHT_ANKLE
-        val foot = pose.getOrNull(ankleIdx) ?: return 21.0
+        val foot = pose.getOrNull(toeIdx) ?: pose.getOrNull(ankleIdx) ?: return 29.5
 
         // Convert normalized landmark (0..1) to screen pixels
         val px = foot.x * screenWidth

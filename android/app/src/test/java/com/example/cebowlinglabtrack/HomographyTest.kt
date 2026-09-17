@@ -31,30 +31,30 @@ class HomographyTest {
         assertTrue("RMSE should be < 1.0 px, was: ${calibration.reprojectionErrorRmse}",
             calibration.reprojectionErrorRmse < 1.0)
 
-        // Test forward projection of anchor points
-        val projFoulLeft = homography.forward(LanePoint(1.0, 0.0))
+        // Test forward projection of anchor points (USBC: Board 39 Left, Board 1 Right)
+        val projFoulLeft = homography.forward(LanePoint(39.0, 0.0))
         assertEquals(foulLeft.x, projFoulLeft.x, 0.5)
         assertEquals(foulLeft.y, projFoulLeft.y, 0.5)
 
-        val projFoulRight = homography.forward(LanePoint(39.0, 0.0))
+        val projFoulRight = homography.forward(LanePoint(1.0, 0.0))
         assertEquals(foulRight.x, projFoulRight.x, 0.5)
         assertEquals(foulRight.y, projFoulRight.y, 0.5)
 
         // Test inverse projection (screen pixel -> lane coordinates)
         val invFoulLeft = homography.inverse(foulLeft)
-        assertEquals(1.0, invFoulLeft.board, 0.1)
+        assertEquals(39.0, invFoulLeft.board, 0.1)
         assertEquals(0.0, invFoulLeft.distanceFt, 0.1)
 
         val invFoulRight = homography.inverse(foulRight)
-        assertEquals(39.0, invFoulRight.board, 0.1)
+        assertEquals(1.0, invFoulRight.board, 0.1)
         assertEquals(0.0, invFoulRight.distanceFt, 0.1)
 
         val invArrowsLeft = homography.inverse(arrowsLeft)
-        assertEquals(5.0, invArrowsLeft.board, 0.1)
+        assertEquals(35.0, invArrowsLeft.board, 0.1)
         assertEquals(15.0, invArrowsLeft.distanceFt, 0.1)
 
         val invArrowsRight = homography.inverse(arrowsRight)
-        assertEquals(35.0, invArrowsRight.board, 0.1)
+        assertEquals(5.0, invArrowsRight.board, 0.1)
         assertEquals(15.0, invArrowsRight.distanceFt, 0.1)
     }
 

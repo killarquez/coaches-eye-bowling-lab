@@ -31,7 +31,7 @@ class TFLiteBallDetector(
 
     companion object {
         const val DEFAULT_INPUT_SIZE = 416
-        const val DEFAULT_CONFIDENCE_THRESHOLD = 0.25f
+        const val DEFAULT_CONFIDENCE_THRESHOLD = 0.15f
         const val MAX_DETECTIONS = 10
         const val MODEL_ASSET_PATH = "models/bowling_ball_v1.tflite"
 
@@ -468,7 +468,9 @@ class TFLiteBallDetector(
         width: Int,
         height: Int,
         stride: Int = width,
-        classId: Int = 1
+        classId: Int = 1,
+        minNormX: Double = 0.0,
+        maxNormX: Double = 1.0
     ): LandmarkDetection? {
         if (!isYolo || classId >= yoloClassCount) return null
 
@@ -489,8 +491,11 @@ class TFLiteBallDetector(
         for (i in 0 until anchors) {
             val score = confRow[i]
             if (score >= bestScore) {
-                bestScore = score
-                bestIdx = i
+                val normX = cxRow[i] / inputSize.toDouble()
+                if (normX in minNormX..maxNormX) {
+                    bestScore = score
+                    bestIdx = i
+                }
             }
         }
 
@@ -526,7 +531,9 @@ class TFLiteBallDetector(
         yBuffer: ByteBuffer,
         width: Int,
         height: Int,
-        classId: Int = 1
+        classId: Int = 1,
+        minNormX: Double = 0.0,
+        maxNormX: Double = 1.0
     ): LandmarkDetection? {
         if (!isYolo || classId >= yoloClassCount) return null
 
@@ -547,8 +554,11 @@ class TFLiteBallDetector(
         for (i in 0 until anchors) {
             val score = confRow[i]
             if (score >= bestScore) {
-                bestScore = score
-                bestIdx = i
+                val normX = cxRow[i] / inputSize.toDouble()
+                if (normX in minNormX..maxNormX) {
+                    bestScore = score
+                    bestIdx = i
+                }
             }
         }
 
@@ -578,26 +588,61 @@ class TFLiteBallDetector(
     }
 
     /**
-     * Dedicated convenience detector for the 10-Pin Rack (Class 1).
+     * Dedicated convenience detector for the 10-Pin Rack (Class 1) with optional corridor restriction.
      */
     fun detectPinRack(
         imageBytes: ByteArray,
         width: Int,
         height: Int,
-        stride: Int = width
-    ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 1)
+        stride: Int = width,
+        minNormX: Double = 0.0,
+        maxNormX: Double = 1.0
+    ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 1, minNormX = minNormX, maxNormX = maxNormX)
 
-    fun detectPinRack(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
-        detectLandmark(yBuffer, width, height, classId = 1)
+    fun detectPinRack(
+        yBuffer: ByteBuffer,
+        width: Int,
+        height: Int,
+        minNormX: Double = 0.0,
+        maxNormX: Double = 1.0
+    ): LandmarkDetection? = detectLandmark(yBuffer, width, height, classId = 1, minNormX = minNormX, maxNormX = maxNormX)
+
+    fun detectFoulLine(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 3)
 
     fun detectFoulLine(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
         detectLandmark(yBuffer, width, height, classId = 3)
 
+    fun detectArrows(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 4)
+
     fun detectArrows(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
         detectLandmark(yBuffer, width, height, classId = 4)
 
+    fun detectLane(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 5)
+
     fun detectLane(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
         detectLandmark(yBuffer, width, height, classId = 5)
+
+    fun detectSlideFoot(
+        imageBytes: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int = width
+    ): LandmarkDetection? = detectLandmark(imageBytes, width, height, stride, classId = 6)
 
     fun detectSlideFoot(yBuffer: ByteBuffer, width: Int, height: Int): LandmarkDetection? =
         detectLandmark(yBuffer, width, height, classId = 6)

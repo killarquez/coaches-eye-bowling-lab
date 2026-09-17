@@ -111,7 +111,7 @@ class OpticalBallDetector(
 
         if (poly != null && poly.size == 4) {
             roiMinY = max(0, laneMinY.toInt() - 20)
-            roiMaxY = min(height - 1, laneMaxY.toInt() + 45) // Include release in approach
+            roiMaxY = min(height - 1, laneMaxY.toInt() + 100) // Include early release in approach
         }
 
         // Adaptive ambient compensation: sample lane midpoint to detect global exposure shift
@@ -240,12 +240,12 @@ class OpticalBallDetector(
         val deckR = poly[2]
         val deckL = poly[3]
 
-        if (y < laneMinY - 20 || y > laneMaxY + 50) {
+        if (y < laneMinY - 20 || y > laneMaxY + 110) {
             return Pair(0, -1)
         }
 
-        val tL = ((y - deckL.y) / (flL.y - deckL.y + 1e-9)).coerceIn(0.0, 1.2)
-        val tR = ((y - deckR.y) / (flR.y - deckR.y + 1e-9)).coerceIn(0.0, 1.2)
+        val tL = ((y - deckL.y) / (flL.y - deckL.y + 1e-9)).coerceIn(0.0, 1.3)
+        val tR = ((y - deckR.y) / (flR.y - deckR.y + 1e-9)).coerceIn(0.0, 1.3)
 
         val xL = deckL.x + tL * (flL.x - deckL.x)
         val xR = deckR.x + tR * (flR.x - deckR.x)

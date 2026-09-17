@@ -87,24 +87,42 @@ class AutonomousLaneRecognizer(
 
         val gutterName = if (alignment == Handedness.RIGHT) "RIGHT" else "LEFT"
 
-        // 1. Stage 1: Detect Full 10-Pin Rack (Primary Environmental Anchor)
-        // Priority 1: Check Edge LiteRT 7-Class Model (class 1: pin_rack)
+        // Corridor boundaries based on camera gutter alignment to isolate active lane from adjacent lanes
+        val (minCorridorNormX, maxCorridorNormX) = if (alignment == Handedness.RIGHT) {
+            Pair(0.38, 0.98) // Focus strictly on right-aligned lane, rejecting adjacent left lane (e.g. Lane 53)
+        } else {
+            Pair(0.02, 0.62) // Focus strictly on left-aligned lane, rejecting adjacent right lane
+        }
+
+        // 1. Stage 1: Detect Full 10-Pin Rack within Active Lane Corridor
+        // Priority 1: Check Edge LiteRT 7-Class Model (class 1: pin_rack in active corridor)
         var pinRack: PinRackCandidate? = null
         if (tfliteDetector != null) {
-            val mlRack = tfliteDetector.detectPinRack(imageBytes, width, height, stride)
-            if (mlRack != null && mlRack.confidence >= 0.25f) {
+            val mlRack = tfliteDetector.detectPinRack(
+                imageBytes, width, height, stride,
+                minNormX = minCorridorNormX,
+                maxNormX = maxCorridorNormX
+            )
+            if (mlRack != null && mlRack.confidence >= 0.15f) {
                 val box = mlRack.boundingBox
                 val topY = box[0].toDouble() * h
                 val bottomY = box[2].toDouble() * h
-                val leftX = box[1].toDouble() * w
-                val rightX = box[3].toDouble() * w
-                val widthPx = (rightX - leftX).coerceAtLeast(w * 0.08)
+                var leftX = box[1].toDouble() * w
+                var rightX = box[3].toDouble() * w
+                var widthPx = rightX - leftX
+                val expectedRackWidth = (w * 0.12 * (zoomRatio.coerceIn(1.0f, 3.0f))).coerceAtLeast(110.0)
+                if (widthPx < expectedRackWidth) {
+                    val cx = (leftX + rightX) / 2.0
+                    leftX = (cx - expectedRackWidth / 2.0).coerceAtLeast(0.0)
+                    rightX = (cx + expectedRackWidth / 2.0).coerceAtMost(w - 1.0)
+                    widthPx = rightX - leftX
+                }
                 pinRack = PinRackCandidate(
-                    centerX = mlRack.centroid.x,
+                    centerX = (leftX + rightX) / 2.0,
                     topY = topY,
                     bottomY = bottomY,
                     widthPx = widthPx,
-                    pinPeakCount = 10,
+                    pinPeakCount = 7,
                     contrastRatio = 2.5,
                     confidence = mlRack.confidence.toDouble()
                 )
@@ -113,15 +131,60 @@ class AutonomousLaneRecognizer(
 
         // Priority 2: Fallback to Classical Adaptive Luminance Detection
         if (pinRack == null) {
-            pinRack = detectPinRack(imageBytes, width, height, stride, zoomRatio, alignment)
+            val classicalRack = detectPinRack(imageBytes, width, height, stride, zoomRatio, alignment)
+            // Ensure classical detection is also within the active lane corridor
+            if (classicalRack != null) {
+                val normX = classicalRack.centerX / w
+                if (normX in minCorridorNormX..maxCorridorNormX) {
+                    pinRack = classicalRack
+                }
+            }
         }
         var gutters: GutterBoundaryLines? = null
 
-        if (pinRack != null && pinRack.confidence >= 0.35) {
+        if (pinRack != null && pinRack.confidence >= 0.25) {
             gutters = traceGuttersFromPins(imageBytes, pinRack, width, height, stride, zoomRatio, alignment)
         }
 
-        // Fallback: If pin rack detection was weak or gutter tracing failed, attempt direct gutter detection
+        // Fallback: ML Lane Surface Detection (Class 5)
+        if (gutters == null || gutters.confidence < 0.45) {
+            val mlLane = tfliteDetector?.detectLane(imageBytes, width, height, stride)
+            if (mlLane != null && mlLane.confidence >= 0.20f) {
+                val box = mlLane.boundingBox
+                val topY = box[0].toDouble() * h
+                val bottomY = box[2].toDouble() * h
+                val leftX = box[1].toDouble() * w
+                val rightX = box[3].toDouble() * w
+
+                val deckY = topY.coerceIn(h * 0.15, h * 0.60)
+                val foulLineY = bottomY.coerceIn(h * 0.55, h * 0.98)
+                val dy = (foulLineY - deckY).coerceAtLeast(10.0)
+                val leftSlope = ((leftX * 0.4) - leftX) / dy
+                val rightSlope = ((rightX) - (rightX * 0.95)) / dy
+
+                gutters = GutterBoundaryLines(
+                    leftSlope = leftSlope,
+                    leftIntercept = leftX - leftSlope * deckY,
+                    rightSlope = rightSlope,
+                    rightIntercept = rightX - rightSlope * deckY,
+                    confidence = mlLane.confidence.toDouble()
+                )
+
+                if (pinRack == null) {
+                    pinRack = PinRackCandidate(
+                        centerX = (leftX + rightX) / 2.0,
+                        topY = (deckY - 20.0).coerceAtLeast(0.0),
+                        bottomY = deckY,
+                        widthPx = abs(rightX - leftX).coerceAtLeast(w * 0.08),
+                        pinPeakCount = 10,
+                        contrastRatio = 2.0,
+                        confidence = mlLane.confidence.toDouble()
+                    )
+                }
+            }
+        }
+
+        // Fallback: Classical direct gutter detection
         if (gutters == null || gutters.confidence < 0.45) {
             val directGutters = detectGuttersDirect(imageBytes, width, height, stride, zoomRatio, alignment)
             if (directGutters != null) {
@@ -202,13 +265,18 @@ class AutonomousLaneRecognizer(
         val focalLengthPx = kotlin.math.max(width, height).toDouble()
         val lensCorrector = LensDistortionCorrector(opticalCenterX, opticalCenterY, focalLengthPx)
 
-        // Foul Line corners (0.0 ft, Boards 1 & 39)
+        // Foul Line corners (0.0 ft, Boards 39 & 1)
         val rawFlL = Point2D(gutters.xLeftAt(foulY.toDouble()), foulY.toDouble())
         val rawFlR = Point2D(gutters.xRightAt(foulY.toDouble()), foulY.toDouble())
 
-        // Pin Deck corners (60.0 ft, Boards 1 & 39)
-        val rawPinDeckL = Point2D(gutters.xLeftAt(pinDeckY), pinDeckY)
-        val rawPinDeckR = Point2D(gutters.xRightAt(pinDeckY), pinDeckY)
+        // Pin Deck corners (60.0 ft, Boards 39 & 1)
+        // Deck left is outside the 7-pin by 13% rack width; Deck right is outside the 10-pin by 13% rack width
+        val halfRackW = pinRack.widthPx / 2.0
+        val deckOffset = (pinRack.widthPx * 0.13).coerceIn(10.0, 30.0)
+        val deckLeftX = (pinRack.centerX - halfRackW - deckOffset).coerceIn(0.0, w - 10.0)
+        val deckRightX = (pinRack.centerX + halfRackW + deckOffset).coerceIn(deckLeftX + 20.0, w - 1.0)
+        val rawPinDeckL = Point2D(deckLeftX, pinDeckY)
+        val rawPinDeckR = Point2D(deckRightX, pinDeckY)
 
         // Undistort corners using Brown-Conrady radial model prior to DLT fitting
         val undistortedCorners = lensCorrector.undistortCalibrationCorners(
@@ -233,8 +301,8 @@ class AutonomousLaneRecognizer(
         // Derive Arrow Line (15.0 ft) via exact forward homography projection
         val (alL, arR) = if (hDeck != null) {
             Pair(
-                hDeck.projectLaneToPixel(board = 1.0, distanceFt = LaneConstants.ARROWS_DISTANCE_FT),
-                hDeck.projectLaneToPixel(board = 39.0, distanceFt = LaneConstants.ARROWS_DISTANCE_FT)
+                hDeck.projectLaneToPixel(board = 39.0, distanceFt = LaneConstants.ARROWS_DISTANCE_FT),
+                hDeck.projectLaneToPixel(board = 1.0, distanceFt = LaneConstants.ARROWS_DISTANCE_FT)
             )
         } else {
             val arrowsY = (foulY - (foulY - pinDeckY) * 0.52).toInt().coerceIn(pinDeckY.toInt() + 10, foulY - 10)
@@ -269,13 +337,44 @@ class AutonomousLaneRecognizer(
             )
         }
 
-        // Optimal Zoom Recommendation to fill ~80% of screen width with the lane
-        val laneCoverage = foulW / w
-        val optimalZoom = if (laneCoverage in 0.15..0.95) {
-            (0.80 / laneCoverage).toFloat().coerceIn(1.0f, 3.5f)
-        } else {
-            zoomRatio
-        }
+        // 5. Intelligent Focal Point & Whole-Lane Safe Zoom Calculation
+        // Invariants:
+        // - Pins must remain the prominent focal point (headroom >= 10% from top of screen)
+        // - Foul line & bowler slide foot must remain in frame (footroom >= 12% from bottom of screen)
+        // - Both gutters at foul line must remain inside left/right screen boundaries (margin >= 5%)
+        val pinTopY = pinRack.topY.coerceAtLeast(0.0)
+        val foulYDouble = foulY.toDouble()
+
+        // Maximum safe zoom that prevents clipping pins at the top
+        val zPinsMax = if (pinTopY < 0.50 * h) {
+            ((0.40 * h) / (0.50 * h - pinTopY)).coerceAtLeast(1.0)
+        } else 3.5
+
+        // Maximum safe zoom that prevents clipping foul line / slide foot at the bottom
+        val zFoulMax = if (foulYDouble > 0.50 * h) {
+            ((0.38 * h) / (foulYDouble - 0.50 * h)).coerceAtLeast(1.0)
+        } else 3.5
+
+        // Maximum safe zoom that prevents clipping left/right gutters
+        val zLeftMax = if (flL.x < 0.50 * w) {
+            ((0.45 * w) / (0.50 * w - flL.x)).coerceAtLeast(1.0)
+        } else 3.5
+
+        val zRightMax = if (flR.x > 0.50 * w) {
+            ((0.45 * w) / (flR.x - 0.50 * w)).coerceAtLeast(1.0)
+        } else 3.5
+
+        val safeZoomCap = min(min(zPinsMax, zFoulMax), min(zLeftMax, zRightMax))
+
+        // Target lane coverage: fill ~78% of width and ~72% of height
+        val laneW = (flR.x - flL.x).coerceAtLeast(w * 0.10)
+        val laneH = (foulYDouble - pinTopY).coerceAtLeast(h * 0.15)
+        val targetZoomX = (0.78 * w) / laneW
+        val targetZoomY = (0.72 * h) / laneH
+        val desiredZoom = min(targetZoomX, targetZoomY)
+
+        val optimalZoom = min(safeZoomCap, desiredZoom).toFloat().coerceIn(1.0f, 3.0f)
+
 
         val calibPair = if (anchorMode == CalibrationAnchorMode.PIN_DECK) {
             deckCalibResult
@@ -318,8 +417,8 @@ class AutonomousLaneRecognizer(
     }
 
     /**
-     * Detects the distinctive 10-pin triangular rack at the end of the lane.
-     * Uses adaptive luminance thresholds to support diverse alley lighting (bright, dim, or colored LED pinsetters).
+     * Detects the distinctive 10-pin triangular rack (7 visible pin columns) at the end of the lane.
+     * Uses 7-pin cluster peak extraction to ensure pins 6 and 10 are never omitted and isolates the active lane.
      */
     fun detectPinRack(
         imageBytes: ByteArray,
@@ -332,112 +431,123 @@ class AutonomousLaneRecognizer(
         val w = width.toDouble()
         val h = height.toDouble()
 
-        // Pin rack search vertical region:
-        // In real-world bowling framing (perspective looking down the lane at 60 ft),
-        // the pin deck sits in the upper 2% to 44% of the camera frame.
-        val minScanY = (h * 0.02).toInt().coerceIn(0, height - 1)
-        val maxScanY = (h * if (zoomRatio >= 2.0f) 0.45 else 0.42).toInt().coerceIn(minScanY + 10, height - 1)
+        // Search vertical region: pin deck sits in 10% to 58% of frame
+        val minScanY = (h * 0.08).toInt().coerceIn(0, height - 1)
+        val maxScanY = (h * if (zoomRatio >= 2.0f) 0.58 else 0.54).toInt().coerceIn(minScanY + 10, height - 1)
 
         var bestCandidate: PinRackCandidate? = null
         var maxScore = 0.0
 
-        val rowStep = 2
+        val rowStep = 3
         for (y in minScanY..maxScanY step rowStep) {
             val rowOffset = y * stride
             if (rowOffset + width > imageBytes.size) break
 
-            val minX = (w * 0.08).toInt()
-            val maxX = (w * 0.92).toInt()
+            val minX = (w * 0.05).toInt()
+            val maxX = (w * 0.95).toInt()
 
-            // Calculate row brightness statistics to adapt to ambient lighting
+            // 1. Calculate row brightness statistics
             var rowMax = 0
-            for (x in minX..maxX step 3) {
+            for (x in minX..maxX step 4) {
                 val lum = imageBytes[rowOffset + x].toInt() and 0xFF
                 if (lum > rowMax) rowMax = lum
             }
-            if (rowMax < 85) continue // Skip uniformly dark background rows
+            if (rowMax < 90) continue // Skip dark rows
 
-            val pinThreshold = max(80, (rowMax * 0.72).toInt())
-            val peakMin = max(85, (rowMax * 0.78).toInt())
+            val peakThreshold = max(90, (rowMax * 0.65).toInt())
 
-            var inBrightSegment = false
-            var segmentStartX = 0
-            var segmentEndX = 0
-            var segmentPeakCount = 0
-            var segmentMaxLum = 0
-            var prevVal = 0
+            // 2. Find individual pin reflection peaks (standing pins) across the row
+            val peaks = mutableListOf<Int>()
+            var prevLum = imageBytes[rowOffset + minX].toInt() and 0xFF
             var isRising = false
-            var darkGapCount = 0
 
-            for (x in minX..maxX) {
-                val idx = rowOffset + x
-                val lum = imageBytes[idx].toInt() and 0xFF
-
-                // Check for local maxima (pin reflection peaks)
-                if (lum > prevVal) {
+            for (x in (minX + 1)..maxX) {
+                val lum = imageBytes[rowOffset + x].toInt() and 0xFF
+                if (lum > prevLum) {
                     isRising = true
-                } else if (lum < prevVal - 3 && isRising && prevVal >= peakMin) {
-                    segmentPeakCount++
+                } else if (lum < prevLum && isRising) {
+                    if (prevLum >= peakThreshold) {
+                        peaks.add(x - 1)
+                    }
                     isRising = false
                 }
-                prevVal = lum
+                prevLum = lum
+            }
 
-                if (lum >= pinThreshold && !inBrightSegment) {
-                    inBrightSegment = true
-                    segmentStartX = x
-                    segmentEndX = x
-                    segmentPeakCount = 0
-                    segmentMaxLum = lum
-                    darkGapCount = 0
-                } else if (inBrightSegment) {
-                    if (lum > segmentMaxLum) segmentMaxLum = lum
-                    if (lum >= (pinThreshold * 0.85).toInt()) {
-                        segmentEndX = x
-                        darkGapCount = 0
+            if (peaks.size < 4) continue
+
+            // 3. Cluster peaks into contiguous pin racks (adjacent pin spacing between 12px and 45px)
+            val clusters = mutableListOf<MutableList<Int>>()
+            var currentCluster = mutableListOf<Int>()
+
+            for (p in peaks) {
+                if (currentCluster.isEmpty()) {
+                    currentCluster.add(p)
+                } else {
+                    val gap = p - currentCluster.last()
+                    if (gap in 10..48) {
+                        currentCluster.add(p)
+                    } else if (gap > 48) {
+                        if (currentCluster.size >= 4) {
+                            clusters.add(currentCluster)
+                        }
+                        currentCluster = mutableListOf(p)
+                    }
+                }
+            }
+            if (currentCluster.size >= 4) {
+                clusters.add(currentCluster)
+            }
+
+            // 4. Evaluate each rack cluster: looking for ~7 visible pin columns
+            for (c in clusters) {
+                val xMin = c.first()
+                val xMax = c.last()
+                val rackWidth = (xMax - xMin).toDouble()
+                val expectedWidth = w * (0.09 + 0.06 * (zoomRatio - 1.0f).coerceIn(0f, 2.5f))
+
+                // Valid 7-pin rack width typically 80px to 260px
+                if (rackWidth in (expectedWidth * 0.55)..(expectedWidth * 2.5)) {
+                    val clusterCenterX = (xMin + xMax) / 2.0
+                    val normCenterX = clusterCenterX / w
+
+                    // Corridor check: camera aligned with right gutter -> active lane rack is on right (normX >= 0.40)
+                    // Camera aligned with left gutter -> active lane rack is on left (normX <= 0.60)
+                    val isInCorridor = if (alignment == Handedness.RIGHT) {
+                        normCenterX in 0.40..0.98
                     } else {
-                        darkGapCount++
+                        normCenterX in 0.02..0.60
+                    }
+                    if (!isInCorridor) continue
+
+                    // Add margin so full 7-pin profile (especially pins 6 and 10) are enclosed
+                    val pad = (rackWidth * 0.06).coerceAtLeast(6.0)
+                    val boundedLeft = (xMin - pad).coerceAtLeast(0.0)
+                    val boundedRight = (xMax + pad).coerceAtMost(w - 1.0)
+                    val finalWidth = boundedRight - boundedLeft
+                    val finalCenter = (boundedLeft + boundedRight) / 2.0
+
+                    val pinCountScore = (min(c.size, 7) / 7.0).coerceIn(0.5, 1.0)
+                    // Favor the aligned lane: rightmost rack for RIGHT alignment, leftmost rack for LEFT alignment
+                    val alignmentBias = if (alignment == Handedness.RIGHT) {
+                        normCenterX.coerceIn(0.5, 1.0)
+                    } else {
+                        (1.0 - normCenterX).coerceIn(0.5, 1.0)
                     }
 
-                    // Segment terminates if dark gap exceeds 10px or row ends
-                    if (darkGapCount > 10 || x == maxX) {
-                        inBrightSegment = false
-                        val segmentWidth = segmentEndX - segmentStartX
-                        val expectedPinRackWidth = w * (0.08 + 0.08 * (zoomRatio - 1.0f).coerceIn(0f, 2.5f))
+                    val score = pinCountScore * 0.6 + alignmentBias * 0.4
 
-                        if (segmentWidth in (expectedPinRackWidth * 0.20).toInt()..(expectedPinRackWidth * 3.0).toInt()) {
-                            val bgLeftX = (segmentStartX - 10).coerceIn(0, width - 1)
-                            val bgRightX = (segmentEndX + 10).coerceIn(0, width - 1)
-                            val bgAboveY = (y - 8).coerceIn(0, height - 1)
-
-                            val bgLeftLum = imageBytes[rowOffset + bgLeftX].toInt() and 0xFF
-                            val bgRightLum = imageBytes[rowOffset + bgRightX].toInt() and 0xFF
-                            val bgAboveLum = imageBytes[bgAboveY * stride + ((segmentStartX + segmentEndX) / 2).coerceIn(0, width - 1)].toInt() and 0xFF
-                            val darkPitLum = min(bgAboveLum, (bgLeftLum + bgRightLum) / 2)
-
-                            val contrast = (segmentMaxLum - darkPitLum).toDouble() / max(darkPitLum.toDouble(), 1.0)
-                            val contrastRatio = (contrast / (contrast + 1.0)).coerceIn(0.0, 1.0)
-
-                            if (contrastRatio > 0.18 && (segmentPeakCount >= 1 || segmentWidth >= 12)) {
-                                val centerX = segmentStartX + segmentWidth / 2.0
-                                val targetRackCenterX = if (alignment == Handedness.RIGHT) w * 0.55 else w * 0.45
-                                val offsetRatio = abs(centerX - targetRackCenterX) / (w / 2.0)
-                                val confidence = ((contrastRatio * 0.5) + (min(segmentPeakCount, 5) / 5.0 * 0.5)).coerceIn(0.0, 1.0)
-                                val score = confidence * (1.0 - 0.45 * offsetRatio)
-
-                                if (score > maxScore) {
-                                    maxScore = score
-                                    bestCandidate = PinRackCandidate(
-                                        centerX = centerX,
-                                        topY = (y - 14).toDouble().coerceAtLeast(0.0),
-                                        bottomY = (y + 14).toDouble().coerceAtMost(h - 1.0),
-                                        widthPx = segmentWidth.toDouble(),
-                                        pinPeakCount = segmentPeakCount,
-                                        contrastRatio = contrastRatio,
-                                        confidence = confidence
-                                    )
-                                }
-                            }
-                        }
+                    if (score > maxScore) {
+                        maxScore = score
+                        bestCandidate = PinRackCandidate(
+                            centerX = finalCenter,
+                            topY = (y - 16).toDouble().coerceAtLeast(0.0),
+                            bottomY = (y + 16).toDouble().coerceAtMost(h - 1.0),
+                            widthPx = finalWidth,
+                            pinPeakCount = c.size,
+                            contrastRatio = 2.0,
+                            confidence = (0.70 + (c.size / 7.0) * 0.25).coerceAtMost(0.98)
+                        )
                     }
                 }
             }

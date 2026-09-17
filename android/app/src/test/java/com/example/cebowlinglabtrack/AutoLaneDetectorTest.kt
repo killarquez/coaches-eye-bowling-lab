@@ -97,7 +97,7 @@ class AutoLaneDetectorTest {
 
         // Frame with pin rack shifted left (pins at X = 250, center is 400 -> coach should pan left)
         val imageShiftedLeft = createSyntheticLaneFrame(width, height, pinRackCenterX = 250.0, includePins = true)
-        val resultLeft = detector.detectLaneFromFrame(imageShiftedLeft, width, height, stride)
+        val resultLeft = detector.detectLaneFromFrame(imageShiftedLeft, width, height, stride, alignment = com.example.cebowlinglabtrack.domain.model.Handedness.LEFT)
         assertTrue("Pin rack must be detected when shifted left", resultLeft.pinRackDetected)
         assertTrue("Guidance should prompt panning left", resultLeft.autoCenterGuidance?.contains("PAN LEFT") == true)
     }
@@ -147,25 +147,25 @@ class AutoLaneDetectorTest {
 
         assertTrue("Reprojection RMSE should be < 1.0 px", calib.reprojectionErrorRmse < 1.0)
 
-        // Verify inverse mapping:
-        // Left gutter at foul line should be Board 1.0, 0.0 ft
+        // Verify inverse mapping (USBC standard: Board 39 Left to Board 1 Right):
+        // Left gutter at foul line should be Board 39.0, 0.0 ft
         val invFoulL = homography.inverse(flL)
-        org.junit.Assert.assertEquals(1.0, invFoulL.board, 0.1)
+        org.junit.Assert.assertEquals(39.0, invFoulL.board, 0.1)
         org.junit.Assert.assertEquals(0.0, invFoulL.distanceFt, 0.1)
 
-        // Right gutter at foul line should be Board 39.0, 0.0 ft
+        // Right gutter at foul line should be Board 1.0, 0.0 ft
         val invFoulR = homography.inverse(flR)
-        org.junit.Assert.assertEquals(39.0, invFoulR.board, 0.1)
+        org.junit.Assert.assertEquals(1.0, invFoulR.board, 0.1)
         org.junit.Assert.assertEquals(0.0, invFoulR.distanceFt, 0.1)
 
-        // Left gutter at 15ft should be Board 1.0, 15.0 ft
+        // Left gutter at 15ft should be Board 39.0, 15.0 ft
         val invArrowsL = homography.inverse(alL)
-        org.junit.Assert.assertEquals(1.0, invArrowsL.board, 0.1)
+        org.junit.Assert.assertEquals(39.0, invArrowsL.board, 0.1)
         org.junit.Assert.assertEquals(15.0, invArrowsL.distanceFt, 0.1)
 
-        // Right gutter at 15ft should be Board 39.0, 15.0 ft
+        // Right gutter at 15ft should be Board 1.0, 15.0 ft
         val invArrowsR = homography.inverse(arR)
-        org.junit.Assert.assertEquals(39.0, invArrowsR.board, 0.1)
+        org.junit.Assert.assertEquals(1.0, invArrowsR.board, 0.1)
         org.junit.Assert.assertEquals(15.0, invArrowsR.distanceFt, 0.1)
     }
 
@@ -217,6 +217,49 @@ class AutoLaneDetectorTest {
         assertNotNull("Detection result should not be null", result)
         assertTrue("Pin rack must be detected when pins are high at 8% height", result.pinRackDetected)
         assertTrue("Detection should succeed at high perspective", result.isSuccess)
+    }
+
+    @Test
+    fun testOptimalZoomKeepsPinsAsFocalPointAndWholeLaneInFrame() {
+        val detector = AutoLaneDetector()
+        val width = 800
+        val height = 1200
+        val stride = width
+
+        // Wide perspective: pin deck at y = 350 (29% height), foul line at y = 800 (66% height)
+        val imageBytes = createSyntheticLaneFrame(
+            width = width,
+            height = height,
+            pinRackCenterX = 440.0,
+            includePins = true
+        )
+
+        val result = detector.detectLaneFromFrame(imageBytes, width, height, stride, alignment = com.example.cebowlinglabtrack.domain.model.Handedness.RIGHT)
+
+        assertNotNull("Detection result should not be null", result)
+        assertTrue("Detection must succeed", result.isSuccess)
+
+        val optZoom = result.optimalZoomRatio
+        assertTrue("Optimal zoom should be >= 1.0f", optZoom >= 1.0f)
+        assertTrue("Optimal zoom should be <= 2.5f to prevent clipping", optZoom <= 2.5f)
+
+        // Verify pins remain focal point (headroom >= 10% from top of screen after zoom)
+        val pinY = result.pinDeckLeft?.y ?: 350.0
+        val zoomedPinY = (pinY - 0.5 * height) * optZoom + 0.5 * height
+        assertTrue("Pins must remain in upper frame with headroom (zoomedPinY >= 10% height)",
+            zoomedPinY >= 0.10 * height)
+
+        // Verify foul line remains in frame (footroom >= 10% from bottom of screen after zoom)
+        val foulY = result.foulLineLeft.y
+        val zoomedFoulY = (foulY - 0.5 * height) * optZoom + 0.5 * height
+        assertTrue("Foul line must remain in frame (zoomedFoulY <= 90% height)",
+            zoomedFoulY <= 0.90 * height)
+
+        // Verify both gutters remain inside horizontal screen bounds
+        val zoomedFlL = (result.foulLineLeft.x - 0.5 * width) * optZoom + 0.5 * width
+        val zoomedFlR = (result.foulLineRight.x - 0.5 * width) * optZoom + 0.5 * width
+        assertTrue("Left gutter must remain inside screen bounds", zoomedFlL >= 0.0)
+        assertTrue("Right gutter must remain inside screen bounds", zoomedFlR <= width.toDouble())
     }
 
     private fun createSyntheticLaneFrame(

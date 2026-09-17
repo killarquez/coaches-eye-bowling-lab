@@ -37,11 +37,10 @@ object TelemetryExtractor {
         val sorted = trajectory.sortedBy { it.yFt }
 
         // 1. SPATIAL PARAMETERS
-        val laydownBoard = interpolateBoardAtDistance(sorted, 0.0)
-
-        // Loft distance: detected loft or first grounded point
-        val loftDistanceFt = detectedLoftFt
-            ?: (sorted.firstOrNull { it.yFt > 0.5 }?.yFt ?: 3.5).coerceIn(0.0, 15.0)
+        // Laydown Board at foul line (0.5 ft) and Dynamic Landing Distance (Loft)
+        val laydownBoard = interpolateBoardAtDistance(sorted, 0.5)
+        val touchdownPt = sorted.firstOrNull { it.yFt in 1.2..5.0 } ?: sorted.firstOrNull { it.yFt >= 0.8 } ?: sorted.first()
+        val loftDistanceFt = detectedLoftFt ?: round1(touchdownPt.yFt.coerceIn(1.0, 12.0))
 
         val arrowBoard = interpolateBoardAtDistance(sorted, LaneConstants.ARROWS_DISTANCE_FT)
         val patternExitBoard = interpolateBoardAtDistance(sorted, oilPatternDistanceFt)

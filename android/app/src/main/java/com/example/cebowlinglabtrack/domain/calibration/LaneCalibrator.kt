@@ -86,22 +86,22 @@ class LaneCalibrator {
     ): Pair<LaneCalibration, HomographyMatrix>? {
         val srcPoints = when (anchorMode) {
             CalibrationAnchorMode.GUTTERS_AT_ARROWS -> listOf(
-                LanePoint(1.0, 0.0),                                       // Foul line left
-                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),     // Foul line right
-                LanePoint(1.0, LaneConstants.ARROWS_DISTANCE_FT),         // Left gutter at 15ft
-                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), LaneConstants.ARROWS_DISTANCE_FT) // Right gutter at 15ft
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),                                       // Foul line left (Board 39)
+                LanePoint(1.0, 0.0),                                                                         // Foul line right (Board 1)
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), LaneConstants.ARROWS_DISTANCE_FT),         // Left gutter at 15ft (Board 39)
+                LanePoint(1.0, LaneConstants.ARROWS_DISTANCE_FT)                                            // Right gutter at 15ft (Board 1)
             )
             CalibrationAnchorMode.ARROW_MARKERS -> listOf(
-                LanePoint(1.0, 0.0),                                       // Foul line left
-                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),     // Foul line right
-                LanePoint(5.0, LaneConstants.ARROWS_DISTANCE_FT),         // Arrows left (B5)
-                LanePoint(35.0, LaneConstants.ARROWS_DISTANCE_FT)         // Arrows right (B35)
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),                                       // Foul line left (Board 39)
+                LanePoint(1.0, 0.0),                                                                         // Foul line right (Board 1)
+                LanePoint(35.0, LaneConstants.ARROWS_DISTANCE_FT),                                         // Arrows left (7th arrow, Board 35)
+                LanePoint(5.0, LaneConstants.ARROWS_DISTANCE_FT)                                           // Arrows right (1st arrow, Board 5)
             )
             CalibrationAnchorMode.PIN_DECK -> listOf(
-                LanePoint(1.0, 0.0),
-                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),
-                LanePoint(1.0, LaneConstants.FOUL_LINE_TO_HEADPIN_FT),
-                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), LaneConstants.FOUL_LINE_TO_HEADPIN_FT)
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), 0.0),                                       // Foul line left (Board 39)
+                LanePoint(1.0, 0.0),                                                                         // Foul line right (Board 1)
+                LanePoint(LaneConstants.TOTAL_BOARDS.toDouble(), LaneConstants.FOUL_LINE_TO_HEADPIN_FT),   // Pin deck left (Board 39)
+                LanePoint(1.0, LaneConstants.FOUL_LINE_TO_HEADPIN_FT)                                       // Pin deck right (Board 1)
             )
         }
 
@@ -161,26 +161,26 @@ class LaneCalibrator {
         homography: HomographyMatrix,
         targetLine: com.example.cebowlinglabtrack.domain.model.VisualTargetLine? = null
     ): ProjectedLaneGuides {
-        // Foul Line
-        val foulLeft = homography.forward(LanePoint(1.0, 0.0))
-        val foulRight = homography.forward(LanePoint(39.0, 0.0))
+        // Foul Line (Board 39 Left to Board 1 Right)
+        val foulLeft = homography.forward(LanePoint(39.0, 0.0))
+        val foulRight = homography.forward(LanePoint(1.0, 0.0))
 
-        // Left Gutter (Board 1 from 0 to 60 ft)
+        // Left Gutter (Board 39 from 0 to 60 ft)
         val leftGutter = listOf(
-            homography.forward(LanePoint(1.0, 0.0)),
-            homography.forward(LanePoint(1.0, 15.0)),
-            homography.forward(LanePoint(1.0, 30.0)),
-            homography.forward(LanePoint(1.0, 45.0)),
-            homography.forward(LanePoint(1.0, 60.0))
-        )
-
-        // Right Gutter (Board 39 from 0 to 60 ft)
-        val rightGutter = listOf(
             homography.forward(LanePoint(39.0, 0.0)),
             homography.forward(LanePoint(39.0, 15.0)),
             homography.forward(LanePoint(39.0, 30.0)),
             homography.forward(LanePoint(39.0, 45.0)),
             homography.forward(LanePoint(39.0, 60.0))
+        )
+
+        // Right Gutter (Board 1 from 0 to 60 ft)
+        val rightGutter = listOf(
+            homography.forward(LanePoint(1.0, 0.0)),
+            homography.forward(LanePoint(1.0, 15.0)),
+            homography.forward(LanePoint(1.0, 30.0)),
+            homography.forward(LanePoint(1.0, 45.0)),
+            homography.forward(LanePoint(1.0, 60.0))
         )
 
         // Centerline (Board 20 from 0 to 60 ft)
@@ -192,21 +192,22 @@ class LaneCalibrator {
             homography.forward(LanePoint(20.0, 60.0))
         )
 
-        // 1. Indicator Dots at 7.5 ft (USBC spec: boards 3, 5, 8, 11, 14, 26, 29, 32, 35, 37)
-        val dotBoards = listOf(3.0, 5.0, 8.0, 11.0, 14.0, 26.0, 29.0, 32.0, 35.0, 37.0)
+        // 1. Indicator Dots at 7.5 ft (USBC spec: boards 37, 35, 32, 29, 26, 14, 11, 8, 5, 3)
+        val dotBoards = listOf(37.0, 35.0, 32.0, 29.0, 26.0, 14.0, 11.0, 8.0, 5.0, 3.0)
         val indicatorDots = dotBoards.map { b ->
             homography.forward(LanePoint(b, 7.5))
         }
 
-        // 2. 7 Targeting Arrows at 12 to 15 ft (forward chevron pattern)
+        // 2. 7 Targeting Arrows at 12.5 to 15.5 ft (USBC regulation forward chevron pattern)
+        // Boards from left to right: 35, 30, 25, 20, 15, 10, 5
         val arrowPositions = listOf(
-            Pair(5.0, 12.0),
-            Pair(10.0, 13.0),
-            Pair(15.0, 14.0),
-            Pair(20.0, 15.0),
-            Pair(25.0, 14.0),
-            Pair(30.0, 13.0),
-            Pair(35.0, 12.0)
+            Pair(35.0, 12.5),
+            Pair(30.0, 13.5),
+            Pair(25.0, 14.5),
+            Pair(20.0, 15.5),
+            Pair(15.0, 14.5),
+            Pair(10.0, 13.5),
+            Pair(5.0, 12.5)
         )
         val arrowPoints = arrowPositions.map { (b, d) ->
             homography.forward(LanePoint(b, d))
@@ -214,19 +215,19 @@ class LaneCalibrator {
         val arrowChevrons = arrowPositions.map { (b, d) ->
             GutterChevron(
                 tip = homography.forward(LanePoint(b, d + 0.8)),
-                leftWing = homography.forward(LanePoint(b - 0.6, d - 0.2)),
-                rightWing = homography.forward(LanePoint(b + 0.6, d - 0.2)),
+                leftWing = homography.forward(LanePoint(b + 0.6, d - 0.2)),
+                rightWing = homography.forward(LanePoint(b - 0.6, d - 0.2)),
                 distanceFt = d
             )
         }
 
         val arrowsLine = Pair(
-            homography.forward(LanePoint(1.0, LaneConstants.ARROWS_DISTANCE_FT)),
-            homography.forward(LanePoint(39.0, LaneConstants.ARROWS_DISTANCE_FT))
+            homography.forward(LanePoint(39.0, LaneConstants.ARROWS_DISTANCE_FT)),
+            homography.forward(LanePoint(1.0, LaneConstants.ARROWS_DISTANCE_FT))
         )
 
-        // 3. Range Finders from 37 ft to 43 ft (Boards 10, 15, 25, 30)
-        val rangeFinderBoards = listOf(10.0, 15.0, 25.0, 30.0)
+        // 3. Range Finders from 37 ft to 43 ft (Boards 30, 25, 15, 10)
+        val rangeFinderBoards = listOf(30.0, 25.0, 15.0, 10.0)
         val rangeFinders = rangeFinderBoards.map { b ->
             RangeFinder(
                 start = homography.forward(LanePoint(b, 37.0)),
@@ -238,10 +239,10 @@ class LaneCalibrator {
         // Headpin (Board 20, 60 ft)
         val headpin = homography.forward(LanePoint(20.0, LaneConstants.FOUL_LINE_TO_HEADPIN_FT))
 
-        // Pin Deck baseline
+        // Pin Deck baseline (Board 39 Left to Board 1 Right)
         val pinDeckLine = Pair(
-            homography.forward(LanePoint(1.0, 60.0)),
-            homography.forward(LanePoint(39.0, 60.0))
+            homography.forward(LanePoint(39.0, 60.0)),
+            homography.forward(LanePoint(1.0, 60.0))
         )
 
         // Project visual target line into camera viewport
@@ -301,18 +302,18 @@ class LaneCalibrator {
                 // Camera aligned with RIGHT gutter (board 39):
                 // Right gutter runs almost vertical near the right third
                 // Left gutter diverges outwards to the left toward the foul line
-                val rFoulX = viewWidth * (0.82f + 0.06f * zoomFactor).coerceAtMost(0.96f)
-                val lFoulX = viewWidth * (0.16f - 0.06f * zoomFactor).coerceAtLeast(0.04f)
+                val rFoulX = viewWidth * (0.83f + 0.05f * zoomFactor).coerceAtMost(0.96f)
+                val lFoulX = viewWidth * (0.18f - 0.06f * zoomFactor).coerceAtLeast(0.04f)
 
                 val (lTopX, rTopX) = if (anchorMode == CalibrationAnchorMode.PIN_DECK) {
                     Pair(
-                        viewWidth * (0.34f - 0.04f * zoomFactor).coerceAtLeast(0.12f),
-                        viewWidth * (0.70f + 0.02f * zoomFactor).coerceAtMost(0.88f)
+                        viewWidth * (0.74f - 0.08f * zoomFactor).coerceAtLeast(0.12f),
+                        viewWidth * (0.89f + 0.04f * zoomFactor).coerceAtMost(0.98f)
                     )
                 } else {
                     Pair(
-                        viewWidth * (0.38f - 0.04f * zoomFactor).coerceAtLeast(0.15f),
-                        viewWidth * (0.73f + 0.04f * zoomFactor).coerceAtMost(0.85f)
+                        viewWidth * (0.55f - 0.08f * zoomFactor).coerceAtLeast(0.15f),
+                        viewWidth * (0.86f + 0.04f * zoomFactor).coerceAtMost(0.96f)
                     )
                 }
 

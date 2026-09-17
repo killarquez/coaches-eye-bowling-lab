@@ -400,8 +400,8 @@ fun CalibrationScreen(
                     CalibrationAnchorMode.ARROW_MARKERS -> "ARROW-R (B35)"
                 }
 
-                drawPinHandle("FL-L (B1)", Offset(flX, flY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 0)
-                drawPinHandle("FL-R (B39)", Offset(frX, frY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 1)
+                drawPinHandle("FL-L (B39)", Offset(flX, flY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 0)
+                drawPinHandle("FL-R (B1)", Offset(frX, frY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else NeonStrikeGreen, selectedPinIndex == 1)
                 drawPinHandle(topLabelL, Offset(alX, alY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else ElectricAmber, selectedPinIndex == 2)
                 drawPinHandle(topLabelR, Offset(arX, arY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else ElectricAmber, selectedPinIndex == 3)
             }

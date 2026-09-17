@@ -34,6 +34,13 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VideoFile
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -105,10 +112,18 @@ fun LiveTrackingScreen(
     onCalibrateDefault: (() -> Unit)? = null,
     onZoomChange: ((Float) -> Unit)? = null,
     onSimulateShot: ((ShotStylePreset) -> Unit)? = null,
+    onPlayVideoFeed: ((Uri) -> Unit)? = null,
+    onStopVideoFeed: (() -> Unit)? = null,
     onSaveShot: (() -> Unit)? = null,
     onViewportSizeChanged: ((Float, Float) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { onPlayVideoFeed?.invoke(it) }
+    }
+
     var showReviewMode by remember { mutableStateOf(false) }
     var showDebugSimulate by remember { mutableStateOf(false) }
     var showTargetSelectorModal by remember { mutableStateOf(false) }
@@ -153,13 +168,22 @@ fun LiveTrackingScreen(
                     onViewportSizeChanged?.invoke(screenW, screenH)
                 }
             }
-            // 1. Live CameraX Preview Stream (120 FPS Target with Hardware Zoom)
-            CameraPreviewView(
-                onFrameAvailable = onFrameAvailable,
-                zoomRatio = state.zoomRatio,
-                targetFps = 120,
-                modifier = Modifier.fillMaxSize()
-            )
+            // 1. Live CameraX Preview Stream or Virtual Video Feed
+            if (state.virtualVideoBitmap != null) {
+                Image(
+                    bitmap = state.virtualVideoBitmap.asImageBitmap(),
+                    contentDescription = "Virtual Camera Feed",
+                    contentScale = ContentScale.FillBounds,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                CameraPreviewView(
+                    onFrameAvailable = onFrameAvailable,
+                    zoomRatio = state.zoomRatio,
+                    targetFps = 120,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // 2. AR Overlays: Cyan Lane Trapezoid, 10-Pin Rack Lock Box & In-Flight Ball Tracking Reticle
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -278,22 +302,68 @@ fun LiveTrackingScreen(
                         }
                     }
 
-                    // Pro Tracking Reticle around ball centroid
+                    // Dynamic Ball-Diameter Reticle & Contact Patch Deciding Factor
                     val lastPt = state.liveTrajectory.last()
-                    val ballScreenPt = homography.forward(
+                    // lastPt is the physical CONTACT PATCH on the lane surface (Z = 0)
+                    val contactScreenPt = homography.forward(
                         com.example.cebowlinglabtrack.domain.model.LanePoint(lastPt.xBoard, lastPt.yFt)
                     )
-                    val bx = ballScreenPt.x.toFloat()
-                    val by = ballScreenPt.y.toFloat()
-                    val rRadius = 22f
-                    val bArm = 8f
+                    val bx = contactScreenPt.x.toFloat()
+                    val contactY = contactScreenPt.y.toFloat()
+
+                    // Ball diameter = 8.59 inches ≈ 8.07 boards (radius = 4.035 boards)
+                    val pLeft = homography.forward(
+                        com.example.cebowlinglabtrack.domain.model.LanePoint(lastPt.xBoard - 4.035, lastPt.yFt)
+                    )
+                    val pRight = homography.forward(
+                        com.example.cebowlinglabtrack.domain.model.LanePoint(lastPt.xBoard + 4.035, lastPt.yFt)
+                    )
+                    val rRadius = (kotlin.math.abs(pRight.x - pLeft.x) / 2.0).toFloat().coerceIn(12f, 95f)
+                    val bArm = (rRadius * 0.35f).coerceIn(6f, 18f)
+                    val by = contactY - rRadius // Ball 3D centroid elevated in screen perspective
 
                     val rLeft = bx - rRadius
                     val rRight = bx + rRadius
                     val rTop = by - rRadius
                     val rBottom = by + rRadius
 
-                    // Corner brackets [  ] around ball
+                    // 1. Full physical ball diameter ring matching perspective at current depth
+                    drawCircle(
+                        color = NeonStrikeGreen,
+                        radius = rRadius,
+                        center = Offset(bx, by),
+                        style = Stroke(width = 2.5f)
+                    )
+                    drawCircle(
+                        color = NeonStrikeGreen.copy(alpha = 0.12f),
+                        radius = rRadius,
+                        center = Offset(bx, by)
+                    )
+
+                    // 2. Vertical plumb line from ball center down to lane contact patch
+                    drawLine(
+                        color = UsbcGold.copy(alpha = 0.85f),
+                        start = Offset(bx, by),
+                        end = Offset(bx, contactY),
+                        strokeWidth = 1.5f
+                    )
+
+                    // 3. Contact Patch Indicator (tangent point of circle parallel to lane surface)
+                    val patchRx = (rRadius * 0.45f).coerceAtLeast(6f)
+                    val patchRy = (rRadius * 0.18f).coerceAtLeast(3f)
+                    drawOval(
+                        color = UsbcGold,
+                        topLeft = Offset(bx - patchRx, contactY - patchRy),
+                        size = androidx.compose.ui.geometry.Size(patchRx * 2f, patchRy * 2f),
+                        style = Stroke(width = 2f)
+                    )
+                    drawCircle(color = PowerCoral, radius = 3.5f, center = Offset(bx, contactY))
+                    drawCircle(color = Color.White, radius = 1.8f, center = Offset(bx, contactY))
+
+                    // 4. Ball centroid marker
+                    drawCircle(color = NeonStrikeGreen, radius = 3.5f, center = Offset(bx, by))
+
+                    // 5. Corner brackets [  ] framing ball diameter
                     drawLine(NeonStrikeGreen, Offset(rLeft, rTop), Offset(rLeft + bArm, rTop), strokeWidth = 2.5f)
                     drawLine(NeonStrikeGreen, Offset(rLeft, rTop), Offset(rLeft, rTop + bArm), strokeWidth = 2.5f)
                     drawLine(NeonStrikeGreen, Offset(rRight, rTop), Offset(rRight - bArm, rTop), strokeWidth = 2.5f)
@@ -302,10 +372,6 @@ fun LiveTrackingScreen(
                     drawLine(NeonStrikeGreen, Offset(rLeft, rBottom), Offset(rLeft, rBottom - bArm), strokeWidth = 2.5f)
                     drawLine(NeonStrikeGreen, Offset(rRight, rBottom), Offset(rRight - bArm, rBottom), strokeWidth = 2.5f)
                     drawLine(NeonStrikeGreen, Offset(rRight, rBottom), Offset(rRight, rBottom - bArm), strokeWidth = 2.5f)
-
-                    // Glowing center core
-                    drawCircle(color = NeonStrikeGreen.copy(alpha = 0.35f), radius = 10f, center = Offset(bx, by))
-                    drawCircle(color = NeonStrikeGreen, radius = 4f, center = Offset(bx, by))
                 }
             }
 
@@ -455,6 +521,45 @@ fun LiveTrackingScreen(
                                 Text(
                                     text = if (state.isLaneCalibrated) "ARMED" else "LOCKED",
                                     color = if (state.isLaneCalibrated) NeonStrikeGreen else PowerCoral,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+
+                        // Virtual Video Feed Chip (Test any MP4 file as live camera input)
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (state.isPlayingVideoFeed) NeonStrikeGreen.copy(alpha = 0.25f)
+                                    else UsbcNavyDark.copy(alpha = 0.85f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (state.isPlayingVideoFeed) NeonStrikeGreen else DarkCardBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    if (state.isPlayingVideoFeed) {
+                                        onStopVideoFeed?.invoke()
+                                    } else {
+                                        videoPickerLauncher.launch("video/*")
+                                    }
+                                }
+                                .padding(horizontal = 7.dp, vertical = 6.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (state.isPlayingVideoFeed) Icons.Default.Stop else Icons.Default.VideoFile,
+                                    contentDescription = "Virtual Video Feed",
+                                    tint = if (state.isPlayingVideoFeed) NeonStrikeGreen else UsbcGold,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = if (state.isPlayingVideoFeed) "STOP FEED" else "TEST VIDEO",
+                                    color = if (state.isPlayingVideoFeed) NeonStrikeGreen else UsbcGold,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold
                                 )
@@ -719,7 +824,7 @@ fun LiveTrackingScreen(
                         )
                     }
 
-                    // Zoom Controls & 1x / 3x Quick Chips
+                    // Zoom Controls & 1x / 1.5x / 2x / 3x Quick Chips
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
@@ -733,13 +838,45 @@ fun LiveTrackingScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (kotlin.math.abs(state.zoomRatio - 1.0f) < 0.2f) UsbcGold else Color.Transparent)
+                                .background(if (kotlin.math.abs(state.zoomRatio - 1.0f) < 0.15f) UsbcGold else Color.Transparent)
                                 .clickable { onZoomChange?.invoke(1.0f) }
-                                .padding(horizontal = 7.dp, vertical = 5.dp)
+                                .padding(horizontal = 6.dp, vertical = 5.dp)
                         ) {
                             Text(
                                 text = "1x",
-                                color = if (kotlin.math.abs(state.zoomRatio - 1.0f) < 0.2f) Color.Black else TextPrimary,
+                                color = if (kotlin.math.abs(state.zoomRatio - 1.0f) < 0.15f) Color.Black else TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // 1.5x Quick Chip (Recommended for foul-line-to-deck full view)
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (kotlin.math.abs(state.zoomRatio - 1.5f) < 0.15f) UsbcGold else Color.Transparent)
+                                .clickable { onZoomChange?.invoke(1.5f) }
+                                .padding(horizontal = 6.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "1.5x",
+                                color = if (kotlin.math.abs(state.zoomRatio - 1.5f) < 0.15f) Color.Black else TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // 2x Quick Chip
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (kotlin.math.abs(state.zoomRatio - 2.0f) < 0.15f) UsbcGold else Color.Transparent)
+                                .clickable { onZoomChange?.invoke(2.0f) }
+                                .padding(horizontal = 6.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "2x",
+                                color = if (kotlin.math.abs(state.zoomRatio - 2.0f) < 0.15f) Color.Black else TextPrimary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -749,13 +886,13 @@ fun LiveTrackingScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (kotlin.math.abs(state.zoomRatio - 3.0f) < 0.2f) UsbcGold else Color.Transparent)
+                                .background(if (kotlin.math.abs(state.zoomRatio - 3.0f) < 0.15f) UsbcGold else Color.Transparent)
                                 .clickable { onZoomChange?.invoke(3.0f) }
-                                .padding(horizontal = 7.dp, vertical = 5.dp)
+                                .padding(horizontal = 6.dp, vertical = 5.dp)
                         ) {
                             Text(
                                 text = "3x",
-                                color = if (kotlin.math.abs(state.zoomRatio - 3.0f) < 0.2f) Color.Black else TextPrimary,
+                                color = if (kotlin.math.abs(state.zoomRatio - 3.0f) < 0.15f) Color.Black else TextPrimary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1031,15 +1168,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawProjectedGuides
         )
     }
 
-    // 4. Arrows Guide Line (15 ft)
-    drawLine(
-        color = NeonCyan.copy(alpha = 0.4f),
-        start = Offset(guides.arrowsLine.first.x.toFloat(), guides.arrowsLine.first.y.toFloat()),
-        end = Offset(guides.arrowsLine.second.x.toFloat(), guides.arrowsLine.second.y.toFloat()),
-        strokeWidth = 1.5f
-    )
-
-    // 5. Targeting Arrow Chevrons at 12-15 ft (forward pointing ^ on boards 5, 10, 15, 20, 25, 30, 35)
+    // 4. Targeting Chevron Arrows at 12.5 - 15.5 ft (forward pointing ^ on boards 5, 10, 15, 20, 25, 30, 35)
     for (ch in guides.arrowChevrons) {
         drawLine(
             color = ElectricAmber.copy(alpha = 0.95f),

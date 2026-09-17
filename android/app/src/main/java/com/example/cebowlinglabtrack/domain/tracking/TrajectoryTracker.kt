@@ -63,11 +63,17 @@ class TrajectoryTracker(
      * @param timeMs Frame timestamp in milliseconds.
      * @return Current filtered trajectory point or null if not yet locked.
      */
-    fun onBallCentroidDetected(centroidScreen: Point2D?, timeMs: Long): TrajectoryPoint? {
+    fun onBallCentroidDetected(centroidScreen: Point2D?, timeMs: Long, ballRadiusPx: Double = 0.0): TrajectoryPoint? {
         if (state == TrackingState.SHOT_COMPLETED) return null
 
-        // 1. Invert pixel coordinate to lane coordinate (Board X, Distance Y)
-        val laneCoord = centroidScreen?.let { homography.inverse(it) }
+        // 1. Invert contact patch pixel coordinate to lane coordinate (Board X, Distance Y)
+        // Using bottom tangent of the circle (y + r) removes 3D elevation parallax and locks to true wood contact
+        val contactScreen = if (centroidScreen != null && ballRadiusPx > 0.0) {
+            Point2D(centroidScreen.x, centroidScreen.y + ballRadiusPx)
+        } else {
+            centroidScreen
+        }
+        val laneCoord = contactScreen?.let { homography.inverse(it) }
 
         val dtSec = if (lastFrameTimeMs > 0) {
             ((timeMs - lastFrameTimeMs) / 1000.0).coerceIn(0.005, 0.1)

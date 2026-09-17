@@ -26,7 +26,10 @@ scratch/
 dataset/
 dataset_multiclass/
 dataset_multiclass_test/
+failures/
+failures_extracted/
 runs/
 weights/
 *.pt
 *.mp4
+

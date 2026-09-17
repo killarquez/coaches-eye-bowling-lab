@@ -32,6 +32,12 @@ import com.example.cebowlinglabtrack.domain.model.VisualTargetLine
 import com.example.cebowlinglabtrack.domain.tracking.TelemetryExtractor
 import com.example.cebowlinglabtrack.domain.tracking.TrackingState
 import com.example.cebowlinglabtrack.domain.tracking.TrajectoryTracker
+import android.content.Context
+import android.net.Uri
+import android.graphics.Bitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,7 +78,10 @@ data class TrackingUiState(
     val laneRecognitionStatus: String? = null,
     val autoCenterGuidance: String? = null,
     val pinRackDetected: Boolean = false,
-    val guttersDetected: Boolean = false
+    val guttersDetected: Boolean = false,
+    val virtualVideoBitmap: Bitmap? = null,
+    val isPlayingVideoFeed: Boolean = false,
+    val videoFeedStatus: String? = null
 )
 
 class TrackingViewModel(application: Application) : AndroidViewModel(application) {
@@ -127,9 +136,9 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             repository.bowlers.collect { roster ->
                 val current = _uiState.value.activeBowler
                 val updatedActive = if (current != null) {
-                    roster.find { it.id == current.id } ?: roster.firstOrNull()
+                    roster.find { it.id == current.id } ?: roster.find { it.id == "CEB-103" } ?: roster.firstOrNull()
                 } else {
-                    roster.firstOrNull()
+                    roster.find { it.id == "CEB-103" } ?: roster.firstOrNull()
                 }
                 _uiState.value = _uiState.value.copy(
                     allBowlers = roster,
@@ -309,8 +318,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             )
         }
 
-        // 4. Feed screen centroid into Extended Kalman Filter state machine (which inverts screen homography)
-        trajectoryTracker.onBallCentroidDetected(screenCentroid, timestampMs)
+        // 4. Feed screen centroid and ball radius into Extended Kalman Filter (computes true lane contact patch)
+        trajectoryTracker.onBallCentroidDetected(screenCentroid, timestampMs, ballRadiusPx.toDouble())
         val currentState = trajectoryTracker.state
 
         if (currentState == TrackingState.SHOT_COMPLETED) {
@@ -472,6 +481,11 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
             viewModelScope.launch {
                 repository.saveCalibration(calib)
+            }
+
+            // Automatically apply the optimal focal zoom to center pins and keep whole lane in frame
+            if (kotlin.math.abs(result.optimalZoomRatio - currentZoom) > 0.05f) {
+                setZoomRatio(result.optimalZoomRatio)
             }
         } else {
             _uiState.value = _uiState.value.copy(
@@ -777,5 +791,116 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
             repository.saveShot(taggedShot)
         }
+    }
+
+    // ========================================================================
+    // Virtual Video Feed (Mock Camera Streaming from MP4 Video Files)
+    // ========================================================================
+
+    private var videoPlaybackJob: Job? = null
+
+    /**
+     * Streams an MP4 video file frame-by-frame into [processLiveFrame] as if it were coming
+     * from the live camera hardware, enabling full offline perception and AR overlay verification.
+     */
+    fun playVideoFeed(context: Context, videoUri: Uri) {
+        stopVideoFeed()
+        videoPlaybackJob = viewModelScope.launch(Dispatchers.IO) {
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, videoUri)
+                val durationStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                val durationMs = durationStr?.toLongOrNull() ?: 8000L
+                val frameRateStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                val fps = frameRateStr?.toDoubleOrNull() ?: 30.0
+                val intervalMs = (1000.0 / fps).toLong().coerceIn(16L, 66L)
+
+                withContext(Dispatchers.Main) {
+                    _uiState.value = _uiState.value.copy(
+                        isPlayingVideoFeed = true,
+                        videoFeedStatus = "Streaming virtual camera feed..."
+                    )
+                    armForNextShot()
+                }
+
+                var currentUs = 0L
+                val endUs = durationMs * 1000L
+
+                // Auto-calibrate on the first frame if needed
+                val firstBitmap = retriever.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST)
+                if (firstBitmap != null) {
+                    val w = firstBitmap.width
+                    val h = firstBitmap.height
+                    val (yBytes, stride) = bitmapToGrayscaleByteArray(firstBitmap)
+                    withContext(Dispatchers.Main) {
+                        autoCalibrateFromFrame(yBytes, w, h, stride)
+                    }
+                }
+
+                while (currentUs <= endUs && isActive) {
+                    val frameStartMs = System.currentTimeMillis()
+                    val bitmap = retriever.getFrameAtTime(currentUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST)
+                    if (bitmap != null) {
+                        val w = bitmap.width
+                        val h = bitmap.height
+                        val (yBytes, stride) = bitmapToGrayscaleByteArray(bitmap)
+                        val timestampMs = currentUs / 1000L
+
+                        withContext(Dispatchers.Main) {
+                            _uiState.value = _uiState.value.copy(virtualVideoBitmap = bitmap)
+                            processLiveFrame(yBytes, w, h, stride, timestampMs)
+                        }
+                    }
+
+                    currentUs += (intervalMs * 1000L)
+                    val elapsed = System.currentTimeMillis() - frameStartMs
+                    val sleepTime = (intervalMs - elapsed).coerceAtLeast(1L)
+                    delay(sleepTime)
+                }
+
+                withContext(Dispatchers.Main) {
+                    _uiState.value = _uiState.value.copy(
+                        isPlayingVideoFeed = false,
+                        videoFeedStatus = "Video feed completed"
+                    )
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _uiState.value = _uiState.value.copy(
+                        isPlayingVideoFeed = false,
+                        videoFeedStatus = "Video feed error: ${e.localizedMessage}"
+                    )
+                }
+            } finally {
+                retriever.release()
+            }
+        }
+    }
+
+    fun stopVideoFeed() {
+        videoPlaybackJob?.cancel()
+        videoPlaybackJob = null
+        _uiState.value = _uiState.value.copy(
+            isPlayingVideoFeed = false,
+            virtualVideoBitmap = null,
+            videoFeedStatus = null
+        )
+    }
+
+    private fun bitmapToGrayscaleByteArray(bitmap: Bitmap): Pair<ByteArray, Int> {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        val yBytes = ByteArray(w * h)
+        for (i in pixels.indices) {
+            val p = pixels[i]
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            // Rec. 601 luma formula
+            yBytes[i] = ((299 * r + 587 * g + 114 * b) / 1000).toByte()
+        }
+        return Pair(yBytes, w)
     }
 }

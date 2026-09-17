@@ -58,6 +58,7 @@ enum class BowlingScreenTab(val title: String, val icon: ImageVector) {
 fun MainNavigation(
     viewModel: TrackingViewModel = viewModel()
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val savedShots by viewModel.savedShots.collectAsState()
 
@@ -137,6 +138,8 @@ fun MainNavigation(
                         onCalibrateDefault = { viewModel.calibrateWithDefaults() },
                         onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
                         onSimulateShot = { preset -> viewModel.simulateShot(preset) },
+                        onPlayVideoFeed = { uri -> viewModel.playVideoFeed(context, uri) },
+                        onStopVideoFeed = { viewModel.stopVideoFeed() },
                         onViewportSizeChanged = { w, h -> viewModel.updateViewportSize(w, h) }
                     )
                 }
