@@ -98,20 +98,25 @@ class VisualTargetLineAndSafetyTest {
     }
 
     @Test
-    fun testGutterChevronsGeneration() {
+    fun testArrowChevronsGeneration() {
         val calibrator = LaneCalibrator()
         val defaultH = HomographyMatrix(LaneCalibrator.DEFAULT_CALIBRATION.homographyMatrixElements.toDoubleArray())
         val guides = calibrator.generateProjectedGuides(defaultH, VisualTargetLine.DEFAULT)
 
         assertNotNull(guides)
-        assertTrue("Left gutter chevrons should be generated down the lane", guides.leftGutterChevrons.isNotEmpty())
-        assertTrue("Right gutter chevrons should be generated down the lane", guides.rightGutterChevrons.isNotEmpty())
+        // Authentic USBC targeting arrows at 15 ft on boards 5, 10, 15, 20, 25, 30, 35
+        assertTrue("USBC 15ft arrow chevrons should be generated across boards", guides.arrowChevrons.isNotEmpty())
+        assertEquals(7, guides.arrowChevrons.size)
 
-        // Verify chevron geometry (tip points down-lane, left and right wings extend backward)
-        val firstLeft = guides.leftGutterChevrons.first()
-        assertNotNull(firstLeft.tip)
-        assertNotNull(firstLeft.leftWing)
-        assertNotNull(firstLeft.rightWing)
+        // Verify gutter chevrons are cleanly discarded per user specification
+        assertTrue("Gutter chevrons discarded to prevent visual clutter", guides.leftGutterChevrons.isEmpty())
+        assertTrue("Gutter chevrons discarded to prevent visual clutter", guides.rightGutterChevrons.isEmpty())
+
+        // Verify chevron geometry (tip points down-lane toward pins)
+        val centerArrow = guides.arrowChevrons[3] // Board 20
+        assertNotNull(centerArrow.tip)
+        assertNotNull(centerArrow.leftWing)
+        assertNotNull(centerArrow.rightWing)
 
         // Verify target line screen points are generated
         assertTrue("Visual target line should be projected onto screen coordinates", guides.targetLinePointsScreen.isNotEmpty())

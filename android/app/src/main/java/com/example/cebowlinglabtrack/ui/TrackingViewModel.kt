@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cebowlinglabtrack.camera.TripodAngleAdvisor
+import com.example.cebowlinglabtrack.camera.ViewfinderCoordinateTransformer
 import com.example.cebowlinglabtrack.data.export.ShotJsonExporter
 import com.example.cebowlinglabtrack.data.repository.BowlingRepository
 import com.example.cebowlinglabtrack.domain.calibration.AutoLaneDetector
@@ -145,9 +146,11 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 baseHomography = h
                 baseCalibrationZoom = if (existingCalib.calibrationZoomRatio in 1.0f..5.0f) existingCalib.calibrationZoomRatio else 1.0f
                 homography = h
-                opticalBallDetector.updateHomography(h)
                 trajectoryTracker.updateHomography(h)
-                pinDeckDetector.updateHomography(h)
+                cameraHomographySyncedForCalibId = ""
+                val w = if (latestWidth > 0) latestWidth.toFloat() else 1080f
+                val hgt = if (latestHeight > 0) latestHeight.toFloat() else 1920f
+                ensureCameraHomographySynced(w, hgt)
                 val guides = calibrator.generateProjectedGuides(h, _uiState.value.activeTargetLine)
                 _uiState.value = _uiState.value.copy(
                     calibration = existingCalib,
@@ -158,13 +161,13 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
                 )
             } else {
                 // Initial launch: uncalibrated physical lane (safety interlock active)
-                val (defaultCalib, defaultH) = calibrator.createDefaultCalibration(1080f, 1920f)
+                val (defaultCalib, defaultH) = calibrator.createDefaultCalibration(viewportWidth, viewportHeight)
                 baseHomography = defaultH
                 baseCalibrationZoom = 1.0f
                 homography = defaultH
-                opticalBallDetector.updateHomography(defaultH)
                 trajectoryTracker.updateHomography(defaultH)
-                pinDeckDetector.updateHomography(defaultH)
+                cameraHomographySyncedForCalibId = ""
+                ensureCameraHomographySynced(1080f, 1920f)
                 val guides = calibrator.generateProjectedGuides(defaultH, _uiState.value.activeTargetLine)
                 _uiState.value = _uiState.value.copy(
                     calibration = defaultCalib,
@@ -180,6 +183,38 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
     private var latestWidth: Int = 0
     private var latestHeight: Int = 0
     private var latestStride: Int = 0
+    private var cameraHomographySyncedForWidth = 0
+    private var cameraHomographySyncedForHeight = 0
+    private var cameraHomographySyncedForCalibId = ""
+
+    private fun ensureCameraHomographySynced(camW: Float, camH: Float) {
+        val calib = _uiState.value.calibration ?: return
+        if (cameraHomographySyncedForWidth == camW.toInt() &&
+            cameraHomographySyncedForHeight == camH.toInt() &&
+            cameraHomographySyncedForCalibId == calib.id) {
+            return
+        }
+        val transformer = ViewfinderCoordinateTransformer(camW, camH, viewportWidth, viewportHeight)
+        val foulLeftCam = transformer.screenToCamera(calib.foulLineLeftScreen)
+        val foulRightCam = transformer.screenToCamera(calib.foulLineRightScreen)
+        val deckLeftCam = transformer.screenToCamera(calib.arrowsLeftScreen)
+        val deckRightCam = transformer.screenToCamera(calib.arrowsRightScreen)
+
+        val camCalibPair = calibrator.calibrate(
+            foulLineLeft = foulLeftCam,
+            foulLineRight = foulRightCam,
+            arrowsLeft = deckLeftCam,
+            arrowsRight = deckRightCam,
+            anchorMode = CalibrationAnchorMode.PIN_DECK,
+            calibrationZoomRatio = _uiState.value.zoomRatio
+        )
+        val camHMatrix = camCalibPair?.second ?: homography
+        opticalBallDetector.updateHomography(camHMatrix)
+        pinDeckDetector.updateHomography(camHMatrix)
+        cameraHomographySyncedForWidth = camW.toInt()
+        cameraHomographySyncedForHeight = camH.toInt()
+        cameraHomographySyncedForCalibId = calib.id
+    }
 
     override fun onCleared() {
         super.onCleared()
@@ -213,6 +248,14 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             return
         }
 
+        val transformer = ViewfinderCoordinateTransformer(
+            cameraWidth = width.toFloat(),
+            cameraHeight = height.toFloat(),
+            screenWidth = viewportWidth,
+            screenHeight = viewportHeight
+        )
+        ensureCameraHomographySynced(width.toFloat(), height.toFloat())
+
         // Before ball is launched, ensure baseline pin status is primed and live standing pins monitored
         if (_uiState.value.trackingState == TrackingState.IDLE) {
             pinDeckDetector.captureBaselinePins(imageBytes, width, height, stride)
@@ -225,8 +268,8 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             }
         }
 
-        // 1. Run real-time ball detection (LiteRT ML detector with optical differencing fallback)
-        val detectedCentroid: Point2D?
+        // 1. Run real-time ball detection in Camera Buffer Space
+        val detectedCamCentroid: Point2D?
         val latency: Double
         val ballRadiusPx: Int
 
@@ -234,37 +277,40 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         if (_uiState.value.isMLDetectorActive && mlDetector != null) {
             val mlCentroid = mlDetector.detectBall(imageBytes, width, height, stride)
             if (mlCentroid != null) {
-                detectedCentroid = mlCentroid
+                detectedCamCentroid = mlCentroid
                 latency = mlDetector.getLastInferenceLatencyMs()
                 ballRadiusPx = mlDetector.getLastBallRadiusPx()
             } else {
                 // Secondary fallback to classical optical differencing if ML confidence is below threshold
-                detectedCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
+                detectedCamCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
                 latency = opticalBallDetector.getLastInferenceLatencyMs()
                 ballRadiusPx = opticalBallDetector.getLastBallRadiusPx()
             }
         } else {
             // Optical differencing mode
-            detectedCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
+            detectedCamCentroid = opticalBallDetector.detectBall(imageBytes, width, height, stride)
             latency = opticalBallDetector.getLastInferenceLatencyMs()
             ballRadiusPx = opticalBallDetector.getLastBallRadiusPx()
         }
 
-        // 2. If ball is detected, feed high-contrast tape sub-region into Optical Rev Counter
-        if (detectedCentroid != null && _uiState.value.isOpticalRevModeActive) {
+        // 2. Transform detected ball centroid from camera buffer space to Compose screen space
+        val screenCentroid = detectedCamCentroid?.let { transformer.cameraToScreen(it) }
+
+        // 3. If ball is detected, feed high-contrast tape sub-region into Optical Rev Counter (in camera buffer space)
+        if (detectedCamCentroid != null && _uiState.value.isOpticalRevModeActive) {
             opticalRevCounter.processFrame(
                 imageBytes = imageBytes,
                 width = width,
                 height = height,
                 stride = stride,
-                ballCenter = detectedCentroid,
+                ballCenter = detectedCamCentroid,
                 ballRadiusPx = ballRadiusPx,
                 timestampMs = timestampMs
             )
         }
 
-        // 3. Feed centroid into Extended Kalman Filter state machine
-        trajectoryTracker.onBallCentroidDetected(detectedCentroid, timestampMs)
+        // 4. Feed screen centroid into Extended Kalman Filter state machine (which inverts screen homography)
+        trajectoryTracker.onBallCentroidDetected(screenCentroid, timestampMs)
         val currentState = trajectoryTracker.state
 
         if (currentState == TrackingState.SHOT_COMPLETED) {
@@ -385,7 +431,6 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         alignment: Handedness? = null,
         anchorMode: CalibrationAnchorMode = CalibrationAnchorMode.PIN_DECK
     ): AutoLaneDetector.AutoDetectionResult {
-        updateViewportSize(width.toFloat(), height.toFloat())
         val currentZoom = _uiState.value.zoomRatio
         val effectiveAlignment = alignment ?: (_uiState.value.activeBowler?.handedness ?: Handedness.RIGHT)
         val result = autoLaneDetector.detectLaneFromFrame(
@@ -396,7 +441,9 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             zoomRatio = currentZoom,
             alignment = effectiveAlignment,
             anchorMode = anchorMode,
-            tfliteDetector = tfliteBallDetector
+            tfliteDetector = tfliteBallDetector,
+            screenWidth = viewportWidth,
+            screenHeight = viewportHeight
         )
 
         if (result.isSuccess) {
@@ -406,9 +453,9 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             baseCalibrationZoom = currentZoom
             homography = newH
 
-            opticalBallDetector.updateHomography(newH)
             trajectoryTracker.updateHomography(newH)
-            pinDeckDetector.updateHomography(newH)
+            cameraHomographySyncedForCalibId = ""
+            ensureCameraHomographySynced(width.toFloat(), height.toFloat())
             val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
 
             _uiState.value = _uiState.value.copy(
@@ -462,16 +509,19 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             viewWidth = viewportWidth,
             viewHeight = viewportHeight,
             zoomRatio = currentZoom,
-            anchorMode = anchorMode,
+            anchorMode = CalibrationAnchorMode.PIN_DECK,
             alignment = alignment
         )
         baseHomography = newH
         baseCalibrationZoom = currentZoom
         homography = newH
 
-        opticalBallDetector.updateHomography(newH)
         trajectoryTracker.updateHomography(newH)
-        pinDeckDetector.updateHomography(newH)
+        cameraHomographySyncedForCalibId = ""
+        val w = if (latestWidth > 0) latestWidth.toFloat() else 1080f
+        val h = if (latestHeight > 0) latestHeight.toFloat() else 1920f
+        ensureCameraHomographySynced(w, h)
+
         val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
         _uiState.value = _uiState.value.copy(
             calibration = defaultCalib,
@@ -499,11 +549,13 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
 
         val scaledH = baseHomography.scaleForZoom(scaleFactor, cx, cy)
         homography = scaledH
-        opticalBallDetector.updateHomography(scaledH)
         trajectoryTracker.updateHomography(scaledH)
-        pinDeckDetector.updateHomography(scaledH)
-        val guides = calibrator.generateProjectedGuides(scaledH, _uiState.value.activeTargetLine)
+        cameraHomographySyncedForCalibId = ""
+        val w = if (latestWidth > 0) latestWidth.toFloat() else 1080f
+        val h = if (latestHeight > 0) latestHeight.toFloat() else 1920f
+        ensureCameraHomographySynced(w, h)
 
+        val guides = calibrator.generateProjectedGuides(scaledH, _uiState.value.activeTargetLine)
         _uiState.value = _uiState.value.copy(
             zoomRatio = clampedZoom,
             projectedGuides = guides
@@ -567,7 +619,7 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
             foulLineRight = foulRight,
             arrowsLeft = arrowsLeft,
             arrowsRight = arrowsRight,
-            anchorMode = anchorMode,
+            anchorMode = CalibrationAnchorMode.PIN_DECK,
             calibrationZoomRatio = currentZoom
         ) ?: return
         val (calib, newH) = result
@@ -575,9 +627,12 @@ class TrackingViewModel(application: Application) : AndroidViewModel(application
         baseCalibrationZoom = currentZoom
         homography = newH
 
-        opticalBallDetector.updateHomography(newH)
         trajectoryTracker.updateHomography(newH)
-        pinDeckDetector.updateHomography(newH)
+        cameraHomographySyncedForCalibId = ""
+        val w = if (latestWidth > 0) latestWidth.toFloat() else 1080f
+        val h = if (latestHeight > 0) latestHeight.toFloat() else 1920f
+        ensureCameraHomographySynced(w, h)
+
         val guides = calibrator.generateProjectedGuides(newH, _uiState.value.activeTargetLine)
 
         _uiState.value = _uiState.value.copy(

@@ -244,25 +244,6 @@ class LaneCalibrator {
             homography.forward(LanePoint(39.0, 60.0))
         )
 
-        // Forward AR Gutter Chevrons every 5 ft down the lane (Strike.app style)
-        val chevronDistances = listOf(5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0)
-        val leftChevrons = chevronDistances.map { d ->
-            GutterChevron(
-                tip = homography.forward(LanePoint(1.0, d + 1.2)),
-                leftWing = homography.forward(LanePoint(0.4, d)),
-                rightWing = homography.forward(LanePoint(1.6, d)),
-                distanceFt = d
-            )
-        }
-        val rightChevrons = chevronDistances.map { d ->
-            GutterChevron(
-                tip = homography.forward(LanePoint(39.0, d + 1.2)),
-                leftWing = homography.forward(LanePoint(38.4, d)),
-                rightWing = homography.forward(LanePoint(39.6, d)),
-                distanceFt = d
-            )
-        }
-
         // Project visual target line into camera viewport
         val targetPointsScreen = targetLine?.generateTrajectory(60)?.map { pt ->
             homography.forward(pt)
@@ -280,8 +261,8 @@ class LaneCalibrator {
             rangeFinders = rangeFinders,
             headpinPoint = headpin,
             pinDeckLine = pinDeckLine,
-            leftGutterChevrons = leftChevrons,
-            rightGutterChevrons = rightChevrons,
+            leftGutterChevrons = emptyList(),
+            rightGutterChevrons = emptyList(),
             targetLinePointsScreen = targetPointsScreen
         )
     }

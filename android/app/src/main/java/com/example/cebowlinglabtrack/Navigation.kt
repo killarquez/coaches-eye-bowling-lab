@@ -136,7 +136,8 @@ fun MainNavigation(
                         },
                         onCalibrateDefault = { viewModel.calibrateWithDefaults() },
                         onZoomChange = { ratio -> viewModel.setZoomRatio(ratio) },
-                        onSimulateShot = { preset -> viewModel.simulateShot(preset) }
+                        onSimulateShot = { preset -> viewModel.simulateShot(preset) },
+                        onViewportSizeChanged = { w, h -> viewModel.updateViewportSize(w, h) }
                     )
                 }
                 BowlingScreenTab.LANE_2D -> {
@@ -162,6 +163,7 @@ fun MainNavigation(
                         onAutoDetectLane = { bytes, w, h, s, alignment ->
                             viewModel.autoCalibrateFromFrame(bytes, w, h, s, alignment = alignment)
                         },
+                        onViewportSizeChanged = { w, h -> viewModel.updateViewportSize(w, h) },
                         onSaveCalibration = { flL, flR, arL, arR, mode ->
                             viewModel.updateCalibration(flL, flR, arL, arR, mode)
                             currentTab = BowlingScreenTab.TRACK

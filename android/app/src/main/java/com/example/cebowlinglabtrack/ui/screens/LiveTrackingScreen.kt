@@ -9,6 +9,7 @@ import androidx.compose.ui.res.painterResource
 import com.example.cebowlinglabtrack.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +41,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,6 +106,7 @@ fun LiveTrackingScreen(
     onZoomChange: ((Float) -> Unit)? = null,
     onSimulateShot: ((ShotStylePreset) -> Unit)? = null,
     onSaveShot: (() -> Unit)? = null,
+    onViewportSizeChanged: ((Float, Float) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showReviewMode by remember { mutableStateOf(false) }
@@ -138,11 +141,18 @@ fun LiveTrackingScreen(
         )
     } else {
         // Live Camera Viewfinder & AR Overlays
-        Box(
+        BoxWithConstraints(
             modifier = modifier
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
+            val screenW = constraints.maxWidth.toFloat()
+            val screenH = constraints.maxHeight.toFloat()
+            if (screenW > 50f && screenH > 50f) {
+                LaunchedEffect(screenW, screenH) {
+                    onViewportSizeChanged?.invoke(screenW, screenH)
+                }
+            }
             // 1. Live CameraX Preview Stream (120 FPS Target with Hardware Zoom)
             CameraPreviewView(
                 onFrameAvailable = onFrameAvailable,
@@ -1073,52 +1083,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawProjectedGuides
         center = Offset(guides.headpinPoint.x.toFloat(), guides.headpinPoint.y.toFloat())
     )
 
-    // 6. Forward AR Gutter Chevrons (Delimiting gutter channels pointing down-lane, Strike.app style)
-    for (ch in guides.leftGutterChevrons) {
-        drawLine(
-            color = GutterChevronCyan.copy(alpha = 0.85f),
-            start = Offset(ch.leftWing.x.toFloat(), ch.leftWing.y.toFloat()),
-            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-            strokeWidth = 3f,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = GutterChevronCyan.copy(alpha = 0.85f),
-            start = Offset(ch.rightWing.x.toFloat(), ch.rightWing.y.toFloat()),
-            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-            strokeWidth = 3f,
-            cap = StrokeCap.Round
-        )
-        drawCircle(
-            color = GutterChevronCyan,
-            radius = 3f,
-            center = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat())
-        )
-    }
-
-    for (ch in guides.rightGutterChevrons) {
-        drawLine(
-            color = GutterChevronCyan.copy(alpha = 0.85f),
-            start = Offset(ch.leftWing.x.toFloat(), ch.leftWing.y.toFloat()),
-            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-            strokeWidth = 3f,
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = GutterChevronCyan.copy(alpha = 0.85f),
-            start = Offset(ch.rightWing.x.toFloat(), ch.rightWing.y.toFloat()),
-            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-            strokeWidth = 3f,
-            cap = StrokeCap.Round
-        )
-        drawCircle(
-            color = GutterChevronCyan,
-            radius = 3f,
-            center = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat())
-        )
-    }
-
-    // 7. Visual Target Line (Strike.app style in glowing gold)
+    // 6. Visual Target Line (Strike.app style in glowing gold)
     if (guides.targetLinePointsScreen.size >= 2) {
         for (i in 0 until guides.targetLinePointsScreen.size - 1) {
             val p1 = guides.targetLinePointsScreen[i]

@@ -102,6 +102,7 @@ fun CameraPreviewView(
     }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    val rotationBufferHolder = remember { RotationBufferHolder() }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -154,17 +155,95 @@ fun CameraPreviewView(
                             if (onFrameAvailable != null) {
                                 imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
                                     try {
+                                        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                                        val srcW = imageProxy.width
+                                        val srcH = imageProxy.height
                                         val yPlane = imageProxy.planes[0]
                                         val yBuffer = yPlane.buffer
-                                        val yBytes = ByteArray(yBuffer.remaining())
-                                        yBuffer.get(yBytes)
-
-                                        val width = imageProxy.width
-                                        val height = imageProxy.height
-                                        val stride = yPlane.rowStride
+                                        val srcStride = yPlane.rowStride
                                         val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000L
 
-                                        onFrameAvailable(yBytes, width, height, stride, timestampMs)
+                                        when (rotationDegrees) {
+                                            90 -> {
+                                                // 90° Clockwise Rotation: (W_src, H_src) -> (H_src, W_src)
+                                                val outW = srcH
+                                                val outH = srcW
+                                                val totalPixels = outW * outH
+                                                if (rotationBufferHolder.rotatedBytes == null || rotationBufferHolder.rotatedBytes!!.size != totalPixels) {
+                                                    rotationBufferHolder.rotatedBytes = ByteArray(totalPixels)
+                                                }
+                                                val out = rotationBufferHolder.rotatedBytes!!
+                                                for (ySrc in 0 until srcH) {
+                                                    val srcRowOffset = ySrc * srcStride
+                                                    val xOut = (srcH - 1) - ySrc
+                                                    for (xSrc in 0 until srcW) {
+                                                        val pixel = yBuffer.get(srcRowOffset + xSrc)
+                                                        val outIdx = xSrc * outW + xOut
+                                                        out[outIdx] = pixel
+                                                    }
+                                                }
+                                                onFrameAvailable(out, outW, outH, outW, timestampMs)
+                                            }
+                                            270 -> {
+                                                // 270° Clockwise Rotation: (W_src, H_src) -> (H_src, W_src)
+                                                val outW = srcH
+                                                val outH = srcW
+                                                val totalPixels = outW * outH
+                                                if (rotationBufferHolder.rotatedBytes == null || rotationBufferHolder.rotatedBytes!!.size != totalPixels) {
+                                                    rotationBufferHolder.rotatedBytes = ByteArray(totalPixels)
+                                                }
+                                                val out = rotationBufferHolder.rotatedBytes!!
+                                                for (ySrc in 0 until srcH) {
+                                                    val srcRowOffset = ySrc * srcStride
+                                                    val xOut = ySrc
+                                                    for (xSrc in 0 until srcW) {
+                                                        val pixel = yBuffer.get(srcRowOffset + xSrc)
+                                                        val yOut = (srcW - 1) - xSrc
+                                                        val outIdx = yOut * outW + xOut
+                                                        out[outIdx] = pixel
+                                                    }
+                                                }
+                                                onFrameAvailable(out, outW, outH, outW, timestampMs)
+                                            }
+                                            180 -> {
+                                                val totalPixels = srcW * srcH
+                                                if (rotationBufferHolder.rawBytes == null || rotationBufferHolder.rawBytes!!.size != totalPixels) {
+                                                    rotationBufferHolder.rawBytes = ByteArray(totalPixels)
+                                                }
+                                                val out = rotationBufferHolder.rawBytes!!
+                                                for (ySrc in 0 until srcH) {
+                                                    val srcRowOffset = ySrc * srcStride
+                                                    val yOut = (srcH - 1) - ySrc
+                                                    val outRowOffset = yOut * srcW
+                                                    for (xSrc in 0 until srcW) {
+                                                        val xOut = (srcW - 1) - xSrc
+                                                        out[outRowOffset + xOut] = yBuffer.get(srcRowOffset + xSrc)
+                                                    }
+                                                }
+                                                onFrameAvailable(out, srcW, srcH, srcW, timestampMs)
+                                            }
+                                            else -> {
+                                                // 0°: Direct contiguous copy (packed stride)
+                                                val totalPixels = srcW * srcH
+                                                if (rotationBufferHolder.rawBytes == null || rotationBufferHolder.rawBytes!!.size != totalPixels) {
+                                                    rotationBufferHolder.rawBytes = ByteArray(totalPixels)
+                                                }
+                                                val out = rotationBufferHolder.rawBytes!!
+                                                if (srcStride == srcW) {
+                                                    yBuffer.rewind()
+                                                    yBuffer.get(out, 0, totalPixels)
+                                                } else {
+                                                    for (ySrc in 0 until srcH) {
+                                                        val srcRowOffset = ySrc * srcStride
+                                                        val outRowOffset = ySrc * srcW
+                                                        for (xSrc in 0 until srcW) {
+                                                            out[outRowOffset + xSrc] = yBuffer.get(srcRowOffset + xSrc)
+                                                        }
+                                                    }
+                                                }
+                                                onFrameAvailable(out, srcW, srcH, srcW, timestampMs)
+                                            }
+                                        }
                                     } catch (e: Exception) {
                                         Log.e("CameraPreviewView", "Error in frame analysis", e)
                                     } finally {
@@ -260,4 +339,9 @@ fun CameraPreviewView(
         // Overlay composable content (AR guides, HUD, handles)
         overlayContent()
     }
+}
+
+private class RotationBufferHolder {
+    var rotatedBytes: ByteArray? = null
+    var rawBytes: ByteArray? = null
 }

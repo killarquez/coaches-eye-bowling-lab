@@ -108,6 +108,7 @@ fun CalibrationScreen(
     onAutoDetectLaneDetailed: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, alignment: Handedness, anchorMode: CalibrationAnchorMode) -> AutoLaneDetector.AutoDetectionResult)? = null,
     onAutoDetectLane: ((imageBytes: ByteArray, width: Int, height: Int, stride: Int, alignment: Handedness) -> Boolean)? = null,
     onCalibrateDefault: ((alignment: Handedness) -> Unit)? = null,
+    onViewportSizeChanged: ((Float, Float) -> Unit)? = null,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -117,13 +118,7 @@ fun CalibrationScreen(
     var currentGuidance by remember { mutableStateOf(autoCenterGuidance) }
     LaunchedEffect(autoCenterGuidance) { currentGuidance = autoCenterGuidance }
 
-    var anchorMode by remember {
-        mutableStateOf(
-            currentCalibration?.anchorMode?.let { modeStr ->
-                try { CalibrationAnchorMode.valueOf(modeStr) } catch (e: Exception) { null }
-            } ?: CalibrationAnchorMode.PIN_DECK
-        )
-    }
+    var anchorMode by remember { mutableStateOf(CalibrationAnchorMode.PIN_DECK) }
 
     // 4 Draggable Anchor Handles in Full-Screen Pixel Coordinates
     var flX by remember { mutableStateOf(currentCalibration?.foulLineLeftScreen?.x?.toFloat() ?: 180f) }
@@ -161,6 +156,9 @@ fun CalibrationScreen(
         if (viewWidth > 50f && viewHeight > 50f) {
             lastViewportWidth = viewWidth
             lastViewportHeight = viewHeight
+            LaunchedEffect(viewWidth, viewHeight) {
+                onViewportSizeChanged?.invoke(viewWidth, viewHeight)
+            }
         }
 
         // Initialize default 0 to 60 ft full lane anchors on full-screen layout
@@ -354,41 +352,7 @@ fun CalibrationScreen(
                         )
                     }
 
-                    // 5. Forward AR Gutter Chevrons pointing down-lane
-                    for (ch in guides.leftGutterChevrons) {
-                        drawLine(
-                            color = GutterChevronCyan.copy(alpha = 0.8f),
-                            start = Offset(ch.leftWing.x.toFloat(), ch.leftWing.y.toFloat()),
-                            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-                            strokeWidth = 2.5f,
-                            cap = StrokeCap.Round
-                        )
-                        drawLine(
-                            color = GutterChevronCyan.copy(alpha = 0.8f),
-                            start = Offset(ch.rightWing.x.toFloat(), ch.rightWing.y.toFloat()),
-                            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-                            strokeWidth = 2.5f,
-                            cap = StrokeCap.Round
-                        )
-                    }
-                    for (ch in guides.rightGutterChevrons) {
-                        drawLine(
-                            color = GutterChevronCyan.copy(alpha = 0.8f),
-                            start = Offset(ch.leftWing.x.toFloat(), ch.leftWing.y.toFloat()),
-                            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-                            strokeWidth = 2.5f,
-                            cap = StrokeCap.Round
-                        )
-                        drawLine(
-                            color = GutterChevronCyan.copy(alpha = 0.8f),
-                            start = Offset(ch.rightWing.x.toFloat(), ch.rightWing.y.toFloat()),
-                            end = Offset(ch.tip.x.toFloat(), ch.tip.y.toFloat()),
-                            strokeWidth = 2.5f,
-                            cap = StrokeCap.Round
-                        )
-                    }
-
-                    // 6. 10-Pin Deck Corner Brackets [  ] at 60 ft
+                    // 5. 10-Pin Deck Corner Brackets [  ] at 60 ft
                     // (Real physical pins in the alley sit cleanly inside this bracket with no artificial circles)
                     val pinScreenPts = PinDeckDetector.STANDARD_PIN_COORDS.map { liveH.forward(it) }
                     if (pinScreenPts.isNotEmpty()) {

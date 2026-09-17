@@ -70,6 +70,7 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 arrows_right_y REAL,
                 h_elements TEXT NOT NULL,
                 rmse REAL NOT NULL,
+                anchor_mode TEXT DEFAULT 'PIN_DECK',
                 created_at INTEGER NOT NULL
             )
             """.trimIndent()
@@ -205,6 +206,15 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
             db.execSQL("UPDATE bowlers SET handedness = 'RIGHT', style = 'TWO_HANDED' WHERE id = 'CEB-103'")
         } catch (e: Exception) {
             // Table might not exist yet during creation
+        }
+        try {
+            db.execSQL("ALTER TABLE calibrations ADD COLUMN anchor_mode TEXT DEFAULT 'PIN_DECK'")
+        } catch (e: Exception) {
+            // Column may already exist
+        }
+        try {
+            db.execSQL("UPDATE calibrations SET anchor_mode = 'PIN_DECK'")
+        } catch (e: Exception) {
         }
     }
 
@@ -436,6 +446,7 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
             put("arrows_right_y", calib.arrowsRightScreen.y)
             put("h_elements", json.encodeToString(calib.homographyMatrixElements))
             put("rmse", calib.reprojectionErrorRmse)
+            put("anchor_mode", calib.anchorMode)
             put("created_at", System.currentTimeMillis())
         }
         db.insertWithOnConflict("calibrations", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -458,6 +469,10 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 val arY = c.getDouble(c.getColumnIndexOrThrow("arrows_right_y"))
                 val hStr = c.getString(c.getColumnIndexOrThrow("h_elements"))
                 val rmse = c.getDouble(c.getColumnIndexOrThrow("rmse"))
+                val anchorModeIdx = c.getColumnIndex("anchor_mode")
+                val anchorMode = if (anchorModeIdx >= 0 && !c.isNull(anchorModeIdx)) {
+                    c.getString(anchorModeIdx)
+                } else "PIN_DECK"
 
                 val hList = json.decodeFromString<List<Double>>(hStr)
 
@@ -469,7 +484,8 @@ class BowlingDatabaseHelper(context: Context) : SQLiteOpenHelper(
                     arrowsLeftScreen = Point2D(alX, alY),
                     arrowsRightScreen = Point2D(arX, arY),
                     homographyMatrixElements = hList,
-                    reprojectionErrorRmse = rmse
+                    reprojectionErrorRmse = rmse,
+                    anchorMode = anchorMode
                 )
             }
         }

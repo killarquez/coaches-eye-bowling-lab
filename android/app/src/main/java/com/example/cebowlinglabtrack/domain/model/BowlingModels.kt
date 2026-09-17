@@ -284,5 +284,5 @@ data class LaneCalibration(
     val homographyMatrixElements: List<Double> = emptyList(),
     val reprojectionErrorRmse: Double = 0.0,
     val calibrationZoomRatio: Float = 1.0f,
-    val anchorMode: String = "GUTTERS_AT_ARROWS"
+    val anchorMode: String = "PIN_DECK"
 )
