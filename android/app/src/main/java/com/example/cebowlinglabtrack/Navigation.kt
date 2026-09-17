@@ -8,7 +8,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LineAxis
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
@@ -37,7 +36,6 @@ import com.example.cebowlinglabtrack.theme.TextPrimary
 import com.example.cebowlinglabtrack.ui.TrackingViewModel
 import com.example.cebowlinglabtrack.ui.screens.CalibrationScreen
 import com.example.cebowlinglabtrack.ui.screens.HomeScreen
-import com.example.cebowlinglabtrack.ui.screens.KinematicsDetailScreen
 import com.example.cebowlinglabtrack.ui.screens.LiveTrackingScreen
 import com.example.cebowlinglabtrack.ui.screens.SessionHistoryScreen
 import com.example.cebowlinglabtrack.ui.screens.TopDownLaneScreen
@@ -49,7 +47,6 @@ enum class BowlingScreenTab(val title: String, val icon: ImageVector) {
     HOME("Home", Icons.Default.Home),
     TRACK("Live Track", Icons.Default.Videocam),
     LANE_2D("2D Lane", Icons.Default.LineAxis),
-    KINEMATICS("Kinematics", Icons.Default.Person),
     CALIBRATE("Calibrate", Icons.Default.Tune),
     HISTORY("History", Icons.Default.History)
 }
@@ -149,9 +146,6 @@ fun MainNavigation(
                         shot = uiState.activeShot,
                         targetLine = uiState.activeTargetLine
                     )
-                }
-                BowlingScreenTab.KINEMATICS -> {
-                    KinematicsDetailScreen(kinematics = uiState.liveKinematics ?: uiState.activeShot?.kinematics)
                 }
                 BowlingScreenTab.CALIBRATE -> {
                     CalibrationScreen(
