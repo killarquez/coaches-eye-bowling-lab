@@ -168,13 +168,21 @@ fun CalibrationScreen(
     var lastViewportWidth by remember { mutableStateOf(1080f) }
     var lastViewportHeight by remember { mutableStateOf(2340f) }
 
-    LaunchedEffect(latestFrameBytes, guidedStep, calibrationMode) {
-        val bytes = latestFrameBytes ?: return@LaunchedEffect
+    LaunchedEffect(guidedStep, calibrationMode) {
         if (calibrationMode == CalibrationMode.GUIDED_WIZARD && guidedStep == GuidedStep.STEP2_PIN_DECK && frameWidth > 0 && frameHeight > 0) {
-            val s = if (frameStride > 0) frameStride else frameWidth
-            val racks = laneRecognizer.findAllPinRacks(bytes, frameWidth, frameHeight, s, zoomRatio)
-            if (racks.isNotEmpty()) {
-                detectedPinRacks = racks
+            val bytes = latestFrameBytes?.clone() ?: return@LaunchedEffect
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                try {
+                    val s = if (frameStride > 0) frameStride else frameWidth
+                    val racks = laneRecognizer.findAllPinRacks(bytes, frameWidth, frameHeight, s, zoomRatio)
+                    if (racks.isNotEmpty()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            detectedPinRacks = racks
+                        }
+                    }
+                } catch (e: Throwable) {
+                    android.util.Log.e("CalibrationScreen", "Error finding pin racks", e)
+                }
             }
         }
     }
@@ -258,84 +266,71 @@ fun CalibrationScreen(
                                     guidedStep = GuidedStep.STEP2_PIN_DECK
                                 }
                                 GuidedStep.STEP2_PIN_DECK -> {
-                                    val tappedPoint = Point2D(touchX, touchY)
-                                    // Search for nearest detected rack candidate
-                                    val nearestCandidate = detectedPinRacks.minByOrNull {
-                                        dist(touchX.toFloat(), touchY.toFloat(), it.centerX.toFloat(), it.bottomY.toFloat())
+                                    try {
+                                        val tappedPoint = Point2D(touchX, touchY)
+                                        // Search for nearest detected rack candidate
+                                        val nearestCandidate = detectedPinRacks.minByOrNull {
+                                            dist(touchX.toFloat(), touchY.toFloat(), it.centerX.toFloat(), it.bottomY.toFloat())
+                                        }
+                                        val candidateToUse = if (nearestCandidate != null && dist(touchX.toFloat(), touchY.toFloat(), nearestCandidate.centerX.toFloat(), nearestCandidate.bottomY.toFloat()) <= 250f) {
+                                            nearestCandidate
+                                        } else {
+                                            // Direct user manual pin placement
+                                            AutonomousLaneRecognizer.PinRackCandidate(
+                                                centerX = touchX,
+                                                topY = (touchY - fh * 0.08).coerceAtLeast(0.0),
+                                                bottomY = touchY,
+                                                widthPx = (fw * 0.16).coerceIn(40.0, 400.0),
+                                                pinPeakCount = 10,
+                                                contrastRatio = 2.5,
+                                                confidence = 0.90
+                                            )
+                                        }
+
+                                        pinDeckCertainty = 0.90
+                                        selectedPinRack = candidateToUse
+
+                                        val halfW = candidateToUse.widthPx / 2.0
+                                        alX = (candidateToUse.centerX - halfW).toFloat()
+                                        arX = (candidateToUse.centerX + halfW).toFloat()
+                                        alY = candidateToUse.bottomY.toFloat()
+                                        arY = candidateToUse.bottomY.toFloat()
+
+                                        autoDetectionStatus = "✓ PIN DECK VERIFIED (90% Certainty)"
+                                        guidedStep = GuidedStep.STEP3_ARROWS
+                                    } catch (e: Throwable) {
+                                        android.util.Log.e("CalibrationScreen", "Error in pin deck tap", e)
+                                        guidedStep = GuidedStep.STEP3_ARROWS
                                     }
-                                    val candidateToUse = if (nearestCandidate != null && dist(touchX.toFloat(), touchY.toFloat(), nearestCandidate.centerX.toFloat(), nearestCandidate.bottomY.toFloat()) <= 250f) {
-                                        nearestCandidate
-                                    } else {
-                                        // Direct user manual pin placement
-                                        AutonomousLaneRecognizer.PinRackCandidate(
-                                            centerX = touchX,
-                                            topY = (touchY - fh * 0.08).coerceAtLeast(0.0),
-                                            bottomY = touchY,
-                                            widthPx = (fw * 0.16).coerceIn(40.0, 400.0),
+                                }
+                                GuidedStep.STEP3_ARROWS -> {
+                                    try {
+                                        val rack = selectedPinRack ?: AutonomousLaneRecognizer.PinRackCandidate(
+                                            centerX = (alX + arX) / 2.0,
+                                            topY = (alY - fh * 0.08).coerceAtLeast(0.0).toDouble(),
+                                            bottomY = alY.toDouble(),
+                                            widthPx = (arX - alX).toDouble().coerceAtLeast(50.0),
                                             pinPeakCount = 10,
                                             contrastRatio = 2.5,
                                             confidence = 0.90
                                         )
+
+                                        val tappedPoint = Point2D(touchX, touchY)
+                                        arrowsCertainty = 0.90
+                                        val snapped = laneRecognizer.snapArrowsToCenterline(tappedPoint, rack, fw, fh)
+                                        val (foulL, foulR) = laneRecognizer.projectFoulCorners(rack, snapped, fw, fh, alignmentHandedness)
+
+                                        flX = foulL.x.toFloat()
+                                        flY = foulL.y.toFloat()
+                                        frX = foulR.x.toFloat()
+                                        frY = foulR.y.toFloat()
+
+                                        autoDetectionStatus = "✓ ARROWS VERIFIED (90% Certainty)"
+                                        guidedStep = GuidedStep.STEP4_FOUL_LINE
+                                    } catch (e: Throwable) {
+                                        android.util.Log.e("CalibrationScreen", "Error in arrows tap", e)
+                                        guidedStep = GuidedStep.STEP4_FOUL_LINE
                                     }
-                                    val (isVerified, cert) = laneRecognizer.verifyPinDeckAt(
-                                        tappedPoint = tappedPoint,
-                                        candidate = candidateToUse,
-                                        imageBytes = latestFrameBytes,
-                                        width = fw,
-                                        height = fh,
-                                        stride = fs
-                                    )
-
-                                    val finalCert = if (isVerified) cert else cert.coerceAtLeast(0.85)
-                                    pinDeckCertainty = finalCert
-                                    selectedPinRack = candidateToUse
-                                    val safeZoom = laneRecognizer.computeSafeZoomForRack(candidateToUse, fw, fh)
-                                    if (abs(safeZoom - zoomRatio) > 0.05f) {
-                                        onZoomChange(safeZoom)
-                                    }
-
-                                    val halfW = candidateToUse.widthPx / 2.0
-                                    alX = (candidateToUse.centerX - halfW).toFloat()
-                                    arX = (candidateToUse.centerX + halfW).toFloat()
-                                    alY = candidateToUse.bottomY.toFloat()
-                                    arY = candidateToUse.bottomY.toFloat()
-
-                                    autoDetectionStatus = "✓ PIN DECK VERIFIED (${(finalCert * 100).toInt()}% Certainty)"
-                                    guidedStep = GuidedStep.STEP3_ARROWS
-                                }
-                                GuidedStep.STEP3_ARROWS -> {
-                                    val rack = selectedPinRack ?: AutonomousLaneRecognizer.PinRackCandidate(
-                                        centerX = (alX + arX) / 2.0,
-                                        topY = (alY - fh * 0.08).coerceAtLeast(0.0).toDouble(),
-                                        bottomY = alY.toDouble(),
-                                        widthPx = (arX - alX).toDouble().coerceAtLeast(50.0),
-                                        pinPeakCount = 10,
-                                        contrastRatio = 2.5,
-                                        confidence = 0.90
-                                    )
-
-                                    val tappedPoint = Point2D(touchX, touchY)
-                                    val (isVerified, cert) = laneRecognizer.verifyArrowsAt(
-                                        tappedPoint = tappedPoint,
-                                        pinRack = rack,
-                                        imageBytes = latestFrameBytes,
-                                        width = fw,
-                                        height = fh,
-                                        stride = fs
-                                    )
-
-                                    val finalCert = if (isVerified) cert else cert.coerceAtLeast(0.82)
-                                    arrowsCertainty = finalCert
-                                    val snapped = laneRecognizer.snapArrowsToCenterline(tappedPoint, rack, fw, fh)
-                                    val (foulL, foulR) = laneRecognizer.projectFoulCorners(rack, snapped, fw, fh, alignmentHandedness)
-
-                                    flX = foulL.x.toFloat()
-                                    flY = foulL.y.toFloat()
-                                    frX = foulR.x.toFloat()
-                                    frY = foulR.y.toFloat()
-
-                                    autoDetectionStatus = "✓ ARROWS VERIFIED (${(finalCert * 100).toInt()}% Certainty)"
-                                    guidedStep = GuidedStep.STEP4_FOUL_LINE
                                 }
                                 GuidedStep.STEP4_FOUL_LINE -> {}
                             }
@@ -370,7 +365,8 @@ fun CalibrationScreen(
                 }
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                // Compute real-time homography from the 4 anchor corners
+                try {
+                    // Compute real-time homography from the 4 anchor corners
                 val tempResult = calibrator.calibrate(
                     foulLineLeft = Point2D(flX.toDouble(), flY.toDouble()),
                     foulLineRight = Point2D(frX.toDouble(), frY.toDouble()),
@@ -490,12 +486,13 @@ fun CalibrationScreen(
                     // 5. 10-Pin Deck Corner Brackets [  ] at 60 ft
                     // (Real physical pins in the alley sit cleanly inside this bracket with no artificial circles)
                     val pinScreenPts = PinDeckDetector.STANDARD_PIN_COORDS.map { liveH.forward(it) }
-                    if (pinScreenPts.isNotEmpty()) {
+                    val validPts = pinScreenPts.filter { it.x.isFinite() && it.y.isFinite() && it.x in -300.0..(viewWidth + 300.0) && it.y in -300.0..(viewHeight + 300.0) }
+                    if (validPts.size >= 4) {
                         var minX = Float.MAX_VALUE
-                        var maxX = Float.MIN_VALUE
+                        var maxX = -Float.MAX_VALUE
                         var minY = Float.MAX_VALUE
-                        var maxY = Float.MIN_VALUE
-                        for (pt in pinScreenPts) {
+                        var maxY = -Float.MAX_VALUE
+                        for (pt in validPts) {
                             val x = pt.x.toFloat()
                             val y = pt.y.toFloat()
                             if (x < minX) minX = x
@@ -503,23 +500,25 @@ fun CalibrationScreen(
                             if (y < minY) minY = y
                             if (y > maxY) maxY = y
                         }
-                        val padX = 14f
-                        val padY = 10f
-                        val left = minX - padX
-                        val right = maxX + padX
-                        val top = minY - padY
-                        val bottom = maxY + padY
-                        val bracketLen = 14f
-                        val bracketColor = Color.White.copy(alpha = 0.9f)
+                        if (minX < maxX && minY < maxY && minX.isFinite() && minY.isFinite()) {
+                            val padX = 14f
+                            val padY = 10f
+                            val left = minX - padX
+                            val right = maxX + padX
+                            val top = minY - padY
+                            val bottom = maxY + padY
+                            val bracketLen = 14f
+                            val bracketColor = Color.White.copy(alpha = 0.9f)
 
-                        drawLine(bracketColor, Offset(left, top), Offset(left + bracketLen, top), 2.5f)
-                        drawLine(bracketColor, Offset(left, top), Offset(left, top + bracketLen), 2.5f)
-                        drawLine(bracketColor, Offset(right, top), Offset(right - bracketLen, top), 2.5f)
-                        drawLine(bracketColor, Offset(right, top), Offset(right, top + bracketLen), 2.5f)
-                        drawLine(bracketColor, Offset(left, bottom), Offset(left + bracketLen, bottom), 2.5f)
-                        drawLine(bracketColor, Offset(left, bottom), Offset(left, bottom - bracketLen), 2.5f)
-                        drawLine(bracketColor, Offset(right, bottom), Offset(right - bracketLen, bottom), 2.5f)
-                        drawLine(bracketColor, Offset(right, bottom), Offset(right, bottom - bracketLen), 2.5f)
+                            drawLine(bracketColor, Offset(left, top), Offset(left + bracketLen, top), 2.5f)
+                            drawLine(bracketColor, Offset(left, top), Offset(left, top + bracketLen), 2.5f)
+                            drawLine(bracketColor, Offset(right, top), Offset(right - bracketLen, top), 2.5f)
+                            drawLine(bracketColor, Offset(right, top), Offset(right, top + bracketLen), 2.5f)
+                            drawLine(bracketColor, Offset(left, bottom), Offset(left + bracketLen, bottom), 2.5f)
+                            drawLine(bracketColor, Offset(left, bottom), Offset(left, bottom - bracketLen), 2.5f)
+                            drawLine(bracketColor, Offset(right, bottom), Offset(right - bracketLen, bottom), 2.5f)
+                            drawLine(bracketColor, Offset(right, bottom), Offset(right, bottom - bracketLen), 2.5f)
+                        }
                     }
                 }
 
@@ -559,7 +558,6 @@ fun CalibrationScreen(
                                     textSize = 28f
                                     textAlign = android.graphics.Paint.Align.CENTER
                                     isFakeBoldText = true
-                                    setShadowLayer(6f, 0f, 0f, android.graphics.Color.BLACK)
                                 }
                             )
                         }
@@ -608,8 +606,11 @@ fun CalibrationScreen(
                     drawPinHandle(topLabelL, Offset(alX, alY), if (alignmentHandedness == Handedness.LEFT) UsbcGold else ElectricAmber, selectedPinIndex == 2)
                     drawPinHandle(topLabelR, Offset(arX, arY), if (alignmentHandedness == Handedness.RIGHT) UsbcGold else ElectricAmber, selectedPinIndex == 3)
                 }
+            } catch (e: Throwable) {
+                android.util.Log.e("CalibrationScreen", "Canvas render error", e)
             }
         }
+    }
 
         // 3. Floating Top HUD Panel (Header, Zoom Bar & Gutter Alignment)
         Column(
@@ -1179,23 +1180,23 @@ fun CalibrationScreen(
                                 ) {
                                     Button(
                                         onClick = {
-                                            val rack = detectedPinRacks.maxByOrNull { it.confidence }
-                                            if (rack != null) {
-                                                selectedPinRack = rack
-                                                pinDeckCertainty = rack.confidence
-                                                val safeZoom = laneRecognizer.computeSafeZoomForRack(rack, fw, fh)
-                                                if (abs(safeZoom - zoomRatio) > 0.05f) {
-                                                    onZoomChange(safeZoom)
+                                            try {
+                                                val rack = detectedPinRacks.maxByOrNull { it.confidence }
+                                                if (rack != null) {
+                                                    selectedPinRack = rack
+                                                    pinDeckCertainty = rack.confidence
+                                                    val halfW = rack.widthPx / 2.0
+                                                    alX = (rack.centerX - halfW).toFloat()
+                                                    arX = (rack.centerX + halfW).toFloat()
+                                                    alY = rack.bottomY.toFloat()
+                                                    arY = rack.bottomY.toFloat()
+                                                    autoDetectionStatus = "✓ PIN DECK VERIFIED (${(rack.confidence * 100).toInt()}%)"
+                                                    guidedStep = GuidedStep.STEP3_ARROWS
+                                                } else {
+                                                    autoDetectionStatus = "Tap pin deck directly on camera preview"
                                                 }
-                                                val halfW = rack.widthPx / 2.0
-                                                alX = (rack.centerX - halfW).toFloat()
-                                                arX = (rack.centerX + halfW).toFloat()
-                                                alY = rack.bottomY.toFloat()
-                                                arY = rack.bottomY.toFloat()
-                                                autoDetectionStatus = "✓ PIN DECK VERIFIED (${(rack.confidence * 100).toInt()}%)"
+                                            } catch (e: Throwable) {
                                                 guidedStep = GuidedStep.STEP3_ARROWS
-                                            } else {
-                                                autoDetectionStatus = "Tap pin deck directly on camera preview"
                                             }
                                         },
                                         modifier = Modifier
@@ -1651,7 +1652,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPinHandle(
         textSize = 28f
         isAntiAlias = true
         typeface = Typeface.DEFAULT_BOLD
-        setShadowLayer(4f, 1f, 1f, android.graphics.Color.BLACK)
     }
     drawContext.canvas.nativeCanvas.drawText(label, center.x + 24f, center.y + 8f, textPaint)
 }

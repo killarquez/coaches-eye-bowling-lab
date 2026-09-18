@@ -98,7 +98,15 @@ fun CameraPreviewView(
 
     // Respond to zoom ratio changes
     LaunchedEffect(zoomRatio, cameraInstance) {
-        cameraInstance?.cameraControl?.setZoomRatio(zoomRatio.coerceIn(1.0f, 5.0f))
+        try {
+            val cam = cameraInstance ?: return@LaunchedEffect
+            val zoomState = cam.cameraInfo.zoomState.value
+            val minZ = zoomState?.minZoomRatio ?: 1.0f
+            val maxZ = zoomState?.maxZoomRatio ?: 3.5f
+            cam.cameraControl.setZoomRatio(zoomRatio.coerceIn(minZ, maxZ))
+        } catch (e: Throwable) {
+            Log.e("CameraPreviewView", "setZoomRatio error: ${e.message}")
+        }
     }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
