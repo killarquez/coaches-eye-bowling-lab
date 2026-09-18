@@ -103,15 +103,15 @@ class TrajectoryTracker(
         val zY = laneCoord.distanceFt
 
         // Reject impossible detections far outside lane bounds
-        if (zX < -3.0 || zX > 43.0 || zY < -8.0 || zY > 66.0) {
+        if (zX < 0.0 || zX > 40.0 || zY < -1.0 || zY > 64.0) {
             return null
         }
 
         // Handle state machine transitions
         when (state) {
             TrackingState.IDLE, TrackingState.APPROACH_DETECTED -> {
-                // Ball detection from approach (-4 ft) all the way past arrows (+35 ft) initiates tracking
-                if (zY in -4.0..35.0) {
+                // Ball detection from foul line (-0.5 ft) to arrows (+35 ft) on lane boards [2.5..37.5] initiates tracking
+                if (zY in -0.5..35.0 && zX in 2.5..37.5) {
                     val estVy = 25.0 // ~17 mph default
                     val offsetSec = (zY.coerceAtLeast(0.0) / estVy)
                     shotStartTimeMs = timeMs - (offsetSec * 1000).toLong()

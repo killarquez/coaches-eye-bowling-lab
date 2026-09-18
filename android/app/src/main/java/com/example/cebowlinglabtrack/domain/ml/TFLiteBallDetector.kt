@@ -353,6 +353,7 @@ class TFLiteBallDetector(
         startNs: Long
     ): BallDetectionResult? {
         val scores = outputScores[0]
+        val classes = outputClasses[0]
         val boxes = outputLocations[0]
 
         var bestIdx = -1
@@ -360,7 +361,8 @@ class TFLiteBallDetector(
 
         for (i in 0 until MAX_DETECTIONS) {
             val score = scores[i]
-            if (score >= bestScore) {
+            val classId = classes.getOrElse(i) { 0.0f }.toInt()
+            if (classId == 0 && score >= bestScore) {
                 bestScore = score
                 bestIdx = i
             }

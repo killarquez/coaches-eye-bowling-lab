@@ -75,10 +75,11 @@ class OpticalBallDetector(
     fun updateHomography(newH: HomographyMatrix) {
         this.homography = newH
         // Precompute screen coordinates of the 4 lane corners to enable fast trapezoid bounds
-        val flL = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(1.0, 0.0))
-        val flR = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(39.0, 0.0))
-        val deckR = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(39.0, 60.0))
-        val deckL = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(1.0, 60.0))
+        // USBC standard: Board 39 is Left gutter, Board 1 is Right gutter
+        val flL = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(com.example.cebowlinglabtrack.domain.model.LaneConstants.TOTAL_BOARDS.toDouble(), 0.0))
+        val flR = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(1.0, 0.0))
+        val deckL = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(com.example.cebowlinglabtrack.domain.model.LaneConstants.TOTAL_BOARDS.toDouble(), 60.0))
+        val deckR = newH.forward(com.example.cebowlinglabtrack.domain.model.LanePoint(1.0, 60.0))
         lanePolygon = listOf(flL, flR, deckR, deckL)
         laneMinY = minOf(flL.y, flR.y, deckL.y, deckR.y)
         laneMaxY = maxOf(flL.y, flR.y, deckL.y, deckR.y)
@@ -111,7 +112,7 @@ class OpticalBallDetector(
 
         if (poly != null && poly.size == 4) {
             roiMinY = max(0, laneMinY.toInt() - 20)
-            roiMaxY = min(height - 1, laneMaxY.toInt() + 100) // Include early release in approach
+            roiMaxY = min(height - 1, laneMaxY.toInt() + 15) // Strictly at foul line, preventing approach/foot detection
         }
 
         // Adaptive ambient compensation: sample lane midpoint to detect global exposure shift
@@ -188,7 +189,8 @@ class OpticalBallDetector(
             val c = clusterPool[i]
             if (c.count in minClusterPixels..maxClusterPixels) {
                 val aspect = c.aspectRatio()
-                if (aspect in 0.25..4.0 && c.width() in 6..140 && c.height() in 6..140) {
+                // A bowling ball in perspective is roughly circular: aspect in [0.4, 2.5]
+                if (aspect in 0.4..2.5 && c.width() in 6..140 && c.height() in 6..140) {
                     val cx = c.cx()
                     val cy = c.cy()
 
@@ -200,9 +202,17 @@ class OpticalBallDetector(
                         val directionPenalty = if (dy > 10.0) 250.0 else (if (dy < -2.0) -25.0 else 0.0)
                         dist + directionPenalty
                     } else {
-                        // At ball release, favor cluster closest to foul line with spherical aspect ratio
-                        val aspectPenalty = abs(aspect - 1.0) * 40.0
-                        (roiMaxY - cy) + aspectPenalty
+                        // At initial ball release, verify candidate is physically on the lane bed
+                        val hMat = homography
+                        val lanePt = hMat?.inverse(Point2D(cx, cy))
+                        val isOffLane = lanePt != null && (lanePt.board !in 2.5..37.5 || lanePt.distanceFt < -0.5 || lanePt.distanceFt > 35.0)
+                        if (isOffLane) {
+                            10000.0 // Reject clusters outside boards or deep in approach
+                        } else {
+                            val aspectPenalty = abs(aspect - 1.0) * 80.0
+                            val sizeScore = abs(c.count - 100) * 0.4
+                            aspectPenalty + sizeScore
+                        }
                     }
 
                     if (score < bestScore) {
@@ -213,7 +223,7 @@ class OpticalBallDetector(
             }
         }
 
-        if (bestCandidate != null) {
+        if (bestCandidate != null && bestScore < 5000.0) {
             val cx = bestCandidate.cx()
             val cy = bestCandidate.cy()
             lastKnownBallPos = Point2D(cx, cy)
@@ -240,18 +250,18 @@ class OpticalBallDetector(
         val deckR = poly[2]
         val deckL = poly[3]
 
-        if (y < laneMinY - 20 || y > laneMaxY + 110) {
+        if (y < laneMinY - 20 || y > laneMaxY + 15) {
             return Pair(0, -1)
         }
 
-        val tL = ((y - deckL.y) / (flL.y - deckL.y + 1e-9)).coerceIn(0.0, 1.3)
-        val tR = ((y - deckR.y) / (flR.y - deckR.y + 1e-9)).coerceIn(0.0, 1.3)
+        val tL = ((y - deckL.y) / (flL.y - deckL.y + 1e-9)).coerceIn(0.0, 1.05)
+        val tR = ((y - deckR.y) / (flR.y - deckR.y + 1e-9)).coerceIn(0.0, 1.05)
 
         val xL = deckL.x + tL * (flL.x - deckL.x)
         val xR = deckR.x + tR * (flR.x - deckR.x)
 
-        val minX = max(0, (min(xL, xR) - 35).toInt())
-        val maxX = min(width - 1, (max(xL, xR) + 35).toInt())
+        val minX = max(0, (min(xL, xR) - 10).toInt())
+        val maxX = min(width - 1, (max(xL, xR) + 10).toInt())
 
         return Pair(minX, maxX)
     }
