@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -129,6 +131,7 @@ fun LiveTrackingScreen(
     var showDebugSimulate by remember { mutableStateOf(false) }
     var showTargetSelectorModal by remember { mutableStateOf(false) }
     var selectedPreset by remember { mutableStateOf(ShotStylePreset.POWER_CRANKER) }
+    var isHudVisible by remember { mutableStateOf(true) }
 
     val activeShot = state.activeShot
     val inReview = (showReviewMode || state.trackingState == TrackingState.SHOT_COMPLETED) && activeShot != null
@@ -377,12 +380,13 @@ fun LiveTrackingScreen(
             }
 
             // 4. Top Status Header & Tripod Alignment Advisor
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 40.dp, start = 16.dp, end = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            if (isHudVisible) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 40.dp, start = 16.dp, end = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -691,6 +695,20 @@ fun LiveTrackingScreen(
                                 tint = NeonCyan
                             )
                         }
+
+                        IconButton(
+                            onClick = { isHudVisible = !isHudVisible },
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkSurface.copy(alpha = 0.85f))
+                                .border(1.dp, DarkCardBorder, RoundedCornerShape(8.dp))
+                        ) {
+                            Icon(
+                                imageVector = if (isHudVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = "Toggle HUD",
+                                tint = NeonCyan
+                            )
+                        }
                     }
                 }
 
@@ -748,6 +766,26 @@ fun LiveTrackingScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+        } else {
+            // Minimal floating Eye button at top right to unhide HUD
+            IconButton(
+                onClick = { isHudVisible = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 40.dp, end = 16.dp)
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(DarkSurface.copy(alpha = 0.75f))
+                    .border(1.dp, NeonCyan.copy(alpha = 0.6f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.VisibilityOff,
+                    contentDescription = "Show HUD",
+                    tint = NeonCyan,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
 
             // 4b. Safety Interlock Notification Card (Locks shot recording until calibrated)
             if (!state.isLaneCalibrated) {
@@ -853,12 +891,13 @@ fun LiveTrackingScreen(
             }
 
             // 5. Bottom Live Telemetry, Zoom Controls & Action Bar
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
+            if (isHudVisible) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
                 TelemetryHUDCard(metrics = state.liveMetrics)
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -1054,6 +1093,7 @@ fun LiveTrackingScreen(
                     }
                 }
             }
+        }
         }
     }
 
